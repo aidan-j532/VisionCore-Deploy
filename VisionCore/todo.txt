@@ -1,0 +1,5 @@
+Cause everyones gotta have lists ngl :)
+
+1. Make it give actual 6DOF with keypoints (HARD TO DO!!)
+1. Better logs
+1. Acutlly DEPLOY!!!

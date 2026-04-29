@@ -1,0 +1,96 @@
+{
+    "unit": "meter",
+    "dbscan": {
+        "elipson": 10,
+        "min_samples": 1
+    },
+    "distance_threshold": -1,
+    "network_tables_ip": "10.22.7.2",
+    "use_network_tables": false,
+    "app_mode": true,
+    "debug_mode": false,
+    "record_mode": true,
+    "stale_threshold": 1,
+    "auto_opt": true,
+    "vision_model": {
+        "quantized": true,
+        "file_path": "YoloModels/v26/nano/model.rknn",
+        "input_size": [320, 320],
+        "margin": 0,
+        "min_conf": 0.6
+    },
+    "camera_configs": {
+        "Arducam": {
+            "name": "Arducam",
+            "x": 15.098,
+            "y": 9,
+            "height": 7.9,
+            "pitch": 15,
+            "yaw": 0,
+            "grayscale": false,
+            "fps_cap": 90,
+            "calibration": {
+                "size": 266.9,
+                "distance": 12,
+                "game_piece_size": 5.91,
+                "fov": 70
+            },
+            "source": 0,
+            "subsystem": "field"
+        },
+        "Microsoft Cinema": {
+            "name": "Microsoft Cinema",
+            "x": 0,
+            "y": 0,
+            "height": 0,
+            "pitch": 0,
+            "yaw": 0,
+            "grayscale": false,
+            "fps_cap": 30,
+            "calibration": {
+                "size": 292.8333333333333,
+                "distance": 12,
+                "game_piece_size": 5.91,
+                "fov": 74.9
+            },
+            "source": "/dev/video0",
+            "subsystem": "field"
+        },
+        "Leveno Laptop": {
+            "name": "Leveno Laptop",
+            "x": 0,
+            "y": 0,
+            "height": 0,
+            "pitch": 0,
+            "yaw": 0,
+            "grayscale": false,
+            "fps_cap": 30,
+            "calibration": {
+                "size": 334,
+                "distance": 12,
+                "game_piece_size": 5.91,
+                "fov": 74.9
+            },
+            "source": 0,
+            "subsystem": "field"
+        },
+        "Crappy Microsoft Webcam": {
+            "name": "Crappy Microsoft Webcam",
+            "x": 0,
+            "y": 0,
+            "height": 0,
+            "pitch": 0,
+            "yaw": 0,
+            "grayscale": false,
+            "fps_cap": 30,
+            "calibration": {
+                "size": 315,
+                "distance": 12,
+                "game_piece_size": 5.91,
+                "fov": 74.9
+            },
+            "source": "/dev/video0",
+            "subsystem": "field"
+        }
+    }
+}

@@ -1,0 +1,32 @@
+{
+    "config": {
+        "unit": "meter",
+        "dbscan": {"elipson": 0, "min_samples": 0},
+        "distance_threshold": -1,
+        "vision_model_input_size": [640, 640],
+        "vision_model_file_path": "model.pt",
+        "network_tables_ip": "10.22.7.2",
+        "use_network_tables": true,
+        "app_mode": true,
+        "debug_mode": false,
+        "record_mode": true,
+        "stale_threshold": 1.0,
+        "camera_configs": {
+            "default": {
+                "name": "default",
+                "x": 0, "y": 0, "height": 0, "pitch": 0, "yaw": 0,
+                "grayscale": false,
+                "fps_cap": -1,
+                "calibration": {"size": 0, "distance": 0, "game_piece_size": 0, "fov": 0},
+                "source": "/dev/video0",
+                "subsystem": "field"
+            }
+        },
+        "vision_model": {
+            "quantized": false,
+            "file_path": "model.pt",
+            "input_size": [640, 640]
+        },
+        "auto_opt": true
+    }
+}
