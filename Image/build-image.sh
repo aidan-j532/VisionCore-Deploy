@@ -4,10 +4,10 @@
 # Requirements: debootstrap, qemu-user-static, qemu-system-arm, parted, kpartx
 set -e
 
-IMAGE_NAME="visioncore-orangepi.img"
+IMAGE_NAME="orangepi.img"
 IMAGE_SIZE="4G"
 UBUNTU_RELEASE="jammy" # Ubuntu 22.04 — matches Orange Pi OS base
-REPO_RAW="https://raw.githubusercontent.com/yourname/visioncore/main"
+REPO_RAW="https://raw.githubusercontent.com/aidan-j533/VisionCore-Deploy/main"
 
 echo "=== VisionCore Image Builder ==="
 
