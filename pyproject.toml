@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "visioncore-frc"
-version = "0.2.5"
+version = "0.2.6"
 description = "FRC vision pipeline for object detection and field mapping"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -86,3 +86,6 @@ generic_yolo = "VisionCore.vision.genericYolo:GenericYolo"
 [project.entry-points.visioncore_utilities]
 network_table = "VisionCore.utilities.NetworkTableHandler:NetworkTableHandler"
 video_recorder = "VisionCore.utilities.VideoRecorder:VideoRecorder"
+
+[tool.setuptools.packages.find]
+include = ["VisionCore", "VisionCore.*"]
