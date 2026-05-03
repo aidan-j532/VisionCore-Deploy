@@ -60,12 +60,12 @@ chroot "$MOUNT" systemctl enable systemd-resolved
 
 echo "Injecting first-boot service..."
 
-curl -fsSL "$REPO_RAW/image/first-boot.sh" \
+curl -fsSL "$REPO_RAW/first-boot.sh" \
     -o "$MOUNT/usr/local/bin/first-boot.sh"
 chmod +x "$MOUNT/usr/local/bin/first-boot.sh"
 
 # Copy the systemd unit
-curl -fsSL "$REPO_RAW/image/first-boot.service" \
+curl -fsSL "$REPO_RAW/first-boot.service" \
     -o "$MOUNT/etc/systemd/system/first-boot.service"
 
 touch "$MOUNT/etc/visioncore-firstboot"
