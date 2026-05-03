@@ -39,7 +39,9 @@ class VisionCoreConfig:
                 "file_path": "model.pt",
                 "input_size": [640, 640],
             },
-            "auto_opt": True,
+            "vision_modules": ["object_detection"],
+            "trackers": ["fuel", "path_planner"],
+            "utilities": ["network_table", "video_recorder"],
         }
         self.config = json.loads(json.dumps(self.default_config))  # deep copy
 

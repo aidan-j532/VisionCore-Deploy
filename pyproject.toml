@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "visioncore-frc"
-version = "0.1.5"
+version = "0.2.5"
 description = "FRC vision pipeline for object detection and field mapping"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -74,5 +74,15 @@ metrics = [
 visioncore-run  = "VisionCore.core.game_loop:main"
 visioncore-boot = "VisionCore.boot.boot:on_boot"
 
-[tool.setuptools.packages.find]
-include = ["VisionCore*"]
+[project.entry-points.visioncore_trackers]
+fuel = "VisionCore.trackers.FuelTracker:FuelTracker"
+path_planner = "VisionCore.trackers.PathPlanner:PathPlanner"
+example_custom = "VisionCore.example_custom_tracker:ExampleCustomTracker"
+
+[project.entry-points.visioncore_vision]
+object_detection = "VisionCore.vision.ObjectDetectionCamera:ObjectDetectionCamera"
+generic_yolo = "VisionCore.vision.genericYolo:GenericYolo"
+
+[project.entry-points.visioncore_utilities]
+network_table = "VisionCore.utilities.NetworkTableHandler:NetworkTableHandler"
+video_recorder = "VisionCore.utilities.VideoRecorder:VideoRecorder"

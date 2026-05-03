@@ -1,18 +1,13 @@
+import importlib.metadata
 from VisionCore.utilities.MultipleCameraHandler import MultipleCameraHandler
-from VisionCore.vision.ObjectDetectionCamera import ObjectDetectionCamera
-from VisionCore.trackers.PathPlanner import PathPlanner
-from VisionCore.utilities.NetworkTableHandler import NetworkTableHandler
 import time
 from VisionCore.web.CameraApp import CameraApp
 import threading
 import logging
 import os
 import numpy as np
-from VisionCore.trackers.Fuel import Fuel
-from VisionCore.trackers.FuelTracker import FuelTracker
 from VisionCore.web.Metrics import Metrics
 from VisionCore.web.healthReporter import HealthReporter
-from VisionCore.utilities.VideoRecorder import VideoRecorder
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig
 import signal
 
@@ -44,10 +39,6 @@ class VisionCore:
 
         self.camera_app = CameraApp(cameras=cameras, config=config) if config["app_mode"] else None
         self.health     = HealthReporter(self.camera_app.app, config) if config["app_mode"] else None
-        self.network_handler = (
-            NetworkTableHandler(config["network_tables_ip"])
-            if config["use_network_tables"] else None
-        )
 
         if config["app_mode"]:
             threading.Thread(target=self.camera_app.run, daemon=True).start()
@@ -66,9 +57,36 @@ class VisionCore:
             self.logger.info("%d cameras — multi mode.", len(cameras))
             self.camera_handler = MultipleCameraHandler(cameras)
 
-        self.planner      = PathPlanner(config)
-        self.fuel_tracker = FuelTracker(config)
-        self.recorder     = VideoRecorder(output_dir="VideoRecordings") if config["record_mode"] else None
+        # Load trackers
+        tracker_entries = importlib.metadata.entry_points(group='visioncore_trackers')
+        self.trackers = {}
+        for tracker_name in config.get('trackers', []):
+            if tracker_name in {ep.name: ep for ep in tracker_entries}:
+                tracker_class = tracker_entries[tracker_name].load()
+                self.trackers[tracker_name] = tracker_class(config)
+            else:
+                self.logger.warning(f"Unknown tracker: {tracker_name}")
+
+        # Load utilities
+        utility_entries = importlib.metadata.entry_points(group='visioncore_utilities')
+        self.utilities = {}
+        for util_name in config.get('utilities', []):
+            if util_name in {ep.name: ep for ep in utility_entries}:
+                util_class = utility_entries[util_name].load()
+                if util_name == 'network_table':
+                    self.utilities[util_name] = util_class(config["network_tables_ip"]) if config["use_network_tables"] else None
+                elif util_name == 'video_recorder':
+                    self.utilities[util_name] = util_class(output_dir="VideoRecordings") if config["record_mode"] else None
+                else:
+                    self.utilities[util_name] = util_class(config)
+            else:
+                self.logger.warning(f"Unknown utility: {util_name}")
+
+        # Assign common ones
+        self.planner = self.trackers.get('path_planner')
+        self.fuel_tracker = self.trackers.get('fuel')
+        self.recorder = self.utilities.get('video_recorder')
+        self.network_handler = self.utilities.get('network_table')
 
     def get_default_config(self):
         return self.config.get_default_config()
@@ -170,6 +188,14 @@ class VisionCore:
 
                 _, fuel_list = self.planner.update_fuel_positions(fuel_list)
 
+                # Process with custom trackers
+                for tracker_name, tracker in self.trackers.items():
+                    if hasattr(tracker, 'process_detections'):
+                        try:
+                            tracker.process_detections(fuel_list)
+                        except Exception as e:
+                            self.logger.exception(f"Error in tracker {tracker_name}: {e}")
+
                 network_s = None
                 if self.network_handler:
                     t_n = time.perf_counter()
@@ -261,6 +287,14 @@ class VisionCore:
                     continue
 
                 _, fuel_list = self.planner.update_fuel_positions(fuel_list)
+
+                # Process with custom trackers
+                for tracker_name, tracker in self.trackers.items():
+                    if hasattr(tracker, 'process_detections'):
+                        try:
+                            tracker.process_detections(fuel_list)
+                        except Exception as e:
+                            self.logger.exception(f"Error in tracker {tracker_name}: {e}")
 
                 network_s = None
                 if self.network_handler:

@@ -1,6 +1,6 @@
 from pathlib import Path
+import importlib.metadata
 from VisionCore import VisionCore
-from VisionCore.vision.ObjectDetectionCamera import ObjectDetectionCamera
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig
 from VisionCore.validations.ez import unit_tests
 
@@ -8,12 +8,20 @@ def main():
     config_path = Path(__file__).parent / "config.json"
     config = VisionCoreConfig(str(config_path))
 
-    cameras = [
-        ObjectDetectionCamera(
-            config.camera_config("Microsoft Cinema"),
-            config
-        )
-    ]
+    # Load vision modules dynamically
+    vision_entries = importlib.metadata.entry_points(group='visioncore_vision')
+    vision_classes = {ep.name: ep.load() for ep in vision_entries}
+
+    cameras = []
+    for cam_name in config.camera_configs:
+        cam_config = config.camera_config(cam_name)
+        pipeline = cam_config.get('pipeline', 'object')
+        if pipeline in vision_classes:
+            vision_class = vision_classes[pipeline]
+            camera = vision_class(cam_config, config)
+            cameras.append(camera)
+        else:
+            config.logger.warning(f"Unknown vision pipeline: {pipeline}")
 
     vision = VisionCore(cameras, config)
     vision.run()
