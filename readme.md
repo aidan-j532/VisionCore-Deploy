@@ -1,68 +1,51 @@
-2026 Vision Testing
+VisionCore-Deploy
+=================
 
-This repository contains vision processing code for 2026 FRC competition. The code is organized into simplified and complex implementations.
+This repository contains scripts, libraries, and assets for deploying the VisionCore system.
 
-Simplified folder: detects fuel and sends positions over network tables. Good for competition and low-latency setups.
+Prerequisites
+-------------
+- A Unix-like shell (Linux, macOS, or WSL on Windows)
+- Python 3.10 or newer
 
-Complex folder: does path planning and plotting along with fuel detection. More features but slower.
+Quick install
+-------------
+1. Make scripts executable if needed:
 
-Important Scripts
+   chmod +x install-dev.sh install-deploy.sh
 
-video_feed_broadcaster.py - Flask app that streams camera feed to a website
-yolo_with_cam.py - Runs YOLO vision model on camera (default camera 0)
-pt_to_wtv.py - Converts .pt files to other formats (onnx, xml, etc)
-map_maker.py - Interactive window to create a fuel map
-map_creator.py - Uses the vision model to create a birdseye view from images
-camera_calibration.py - Calculates focal length constants for camera calibration
-livestream_reader.py - Reads frames from a livestream using Camera class
-onnx_to_rknn.py - Converts models to RKNN format
+2. For development setup, run:
 
-Folder Structure
+   ./install-dev.sh
 
-COMPLEX - path planning and plotting with fuel detection
-SIMPLIFIED - fuel detection and network tables sending
-PLOTTERS - plotting and utility experiments
-YOLO_MODELS - YOLO models and exports
+3. For deployment setup, run:
 
-Key Classes
+   ./install-deploy.sh
 
-Camera.py - camera configuration and capture
-CustomDBScan.py - point cloud filtering with DBSCAN
-NetworkTableHandler.py - network tables communication
-PathPlanner.py - path planning logic
-Fuel.py - fuel tracking object
-FuelTracker.py - fuel tracking helper
+Building an image
+-----------------
+To build a device image, run the image build script:
 
-Orange Pi 5 Device
+   cd Image
+   ./build-image.sh
 
-IP: 10.22.7.200
-Username: ubuntu
-Password: 2207vision
+Project layout
+--------------
+- VisionCore/: main Python package with configuration and core modules
+- RknnWheels/: prebuilt RKNN wheel files used for model conversion
+- Image/: image build scripts and first-boot helpers
+- LICENSE: project license file
+- readme.md: legacy project readme (note: this file is distinct from README.md)
 
-To access the device, use SSH with the credentials above.
-To clone the repo on the device: git clone git@github.com:FRC2207/2026-Vision-Testing.git
+Usage
+-----
+- See VisionCore/example_usage.py for example code showing how to use the package.
+- Configuration examples are in VisionCore/example_config.json
 
-Common Commands
+Contributing
+------------
+Contributions are welcome via pull requests. Please follow existing code style and add tests for new behavior.
 
-sudo systemctl restart vision.service - restart the vision service
-tmux attach -t vision - attach to vision tmux session
-git pull - update code from repository
-git reset --hard HEAD - undo local changes
-git clean -fd - remove untracked files
-
-Model Performance
-
-Model         Size    Latency      FPS
-Yolov26       nano    99.5ms       10
-Yolov11       nano    71.5ms       14
-Yolov11       small   98.9ms       10
-Yolov11       medium  235.3ms      4
-Yolov8        nano    20-30ms      30-50
-Yolov8        small   40-60ms      15-25
-Yolov5        nano    15-25ms      40-60
-
-Notes
-
-The repository is functional but has rough edges and moved files during testing.
-When converting models, double-check export settings to avoid losing work.
-The simplified implementation is recommended for competition use.
+License
+-------
+See the LICENSE file at the project root.
