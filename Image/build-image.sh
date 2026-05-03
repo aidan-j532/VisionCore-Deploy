@@ -7,7 +7,7 @@ set -e
 IMAGE_NAME="orangepi.img"
 IMAGE_SIZE="4G"
 UBUNTU_RELEASE="jammy" # Ubuntu 22.04 — matches Orange Pi OS base
-REPO_RAW="https://github.com/aidan-j532/VisionCore-Deploy/tree/main/image"
+REPO_RAW="https://github.com/aidan-j532/VisionCore-Deploy/tree/main/Image"
 
 echo "=== VisionCore Image Builder ==="
 
