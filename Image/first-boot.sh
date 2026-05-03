@@ -25,7 +25,7 @@ for i in $(seq 1 30); do
 done
 
 # Run the main provisioner
-curl -fsSL https://raw.githubusercontent.com/yourname/visioncore/main/provision.sh | bash
+curl -fsSL https://github.com/aidan-j532/VisionCore-Deploy/tree/main/Image/provision.sh | bash
 
 # Remove the flag file so this service never runs again
 rm -f /etc/visioncore-firstboot
