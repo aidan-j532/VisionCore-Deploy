@@ -42,13 +42,6 @@ class VisionCore:
         self.camera_app = CameraApp(cameras=cameras, config=config) if config["app_mode"] else None
         self.health     = HealthReporter(self.camera_app.app, config) if config["app_mode"] else None
 
-        if config["app_mode"]:
-            threading.Thread(target=self.camera_app.run, daemon=True).start()
-            if self.health and cameras:
-                self.health.set_camera(cameras[0])
-            if self.network_handler and self.health:
-                self.health.set_network_handler(self.network_handler)
-
         if len(cameras) == 0:
             self.logger.warning("No cameras provided — vision will not run.")
             self.camera_handler = None
@@ -86,6 +79,14 @@ class VisionCore:
         self.fuel_tracker = self.trackers.get('fuel')
         self.recorder = self.utilities.get('video_recorder')
         self.network_handler = self.utilities.get('network_table')
+
+        if config["app_mode"]:
+            threading.Thread(target=self.camera_app.run, daemon=True).start()
+            if self.health and cameras:
+                self.health.set_camera(cameras[0])
+            if self.network_handler and self.health:
+                self.health.set_network_handler(self.network_handler)
+
 
     def get_default_config(self):
         return self.config.get_default_config()

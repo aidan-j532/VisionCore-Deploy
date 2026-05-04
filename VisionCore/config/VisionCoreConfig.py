@@ -31,7 +31,7 @@ class VisionCoreConfig:
                     "calibration": {"size": 0, "distance": 0, "game_piece_size": 0, "fov": 0},
                     "source": "/dev/video0",
                     "subsystem": "field",
-                    "pipeline": "object",
+                    "pipeline": "object_detection",
                 },
             },
             "vision_model": {
@@ -85,15 +85,14 @@ class VisionCoreConfig:
             self.logger.warning("Failed to load config from %s: %s", file_path, e)
             self.logger.info("Using default configuration.")
 
-    def get(self, *keys):
+    def get(self, *keys, default=None):
         val = self.config
         try:
             for key in keys:
                 val = val[key]
             return val
         except (KeyError, TypeError):
-            self.logger.warning("Key path %s not found in config.", keys)
-            return None
+            return default
 
     def set(self, *keys_and_value):
         if len(keys_and_value) < 2:
@@ -110,7 +109,9 @@ class VisionCoreConfig:
         if current_dict is None:
             current_dict = self.config
         for key, value in data.items():
-            if (
+            if key == "camera_configs":
+                current_dict[key] = value  # always replace entirely
+            elif (
                 isinstance(value, dict)
                 and key in current_dict
                 and isinstance(current_dict[key], dict)

@@ -5,7 +5,7 @@ import logging
 import threading
 import subprocess
 from VisionCore.config.VisionCoreConfig import VisionCoreCameraConfig
-
+import platform
 
 class Camera:
 
@@ -38,9 +38,13 @@ class Camera:
             threading.Thread(target=self._reader, daemon=True, name=f"CamReader-{self.source}").start()
 
     def _open_camera(self):
-        device = self.source if isinstance(self.source, str) else f"/dev/video{self.source}"
+        is_windows = platform.system() == "Windows"
 
-        self.cap = cv2.VideoCapture(self.source, cv2.CAP_V4L2)
+        if is_windows:
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_DSHOW)
+        else:
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_V4L2)
+
         if not self.cap.isOpened():
             raise ValueError(f"Camera failed to open: {self.source}")
 
@@ -48,12 +52,15 @@ class Camera:
         for _ in range(10):
             self.cap.grab()
 
-        subprocess.run(
-            ["v4l2-ctl", "-d", device,
-             f"--set-fmt-video=width={self.input_size[0]},height={self.input_size[1]},pixelformat=MJPG"],
-            capture_output=True,
-        )
-        time.sleep(0.15)
+        # v4l2-ctl is Linux only
+        if not is_windows:
+            device = self.source if isinstance(self.source, str) else f"/dev/video{self.source}"
+            subprocess.run(
+                ["v4l2-ctl", "-d", device,
+                f"--set-fmt-video=width={self.input_size[0]},height={self.input_size[1]},pixelformat=MJPG"],
+                capture_output=True,
+            )
+            time.sleep(0.15)
 
         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.input_size[0])
