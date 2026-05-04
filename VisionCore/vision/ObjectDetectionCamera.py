@@ -7,7 +7,7 @@ import threading
 import queue
 
 from VisionCore.vision.Camera import Camera
-from VisionCore.vision.genericYolo import Box, Results, YoloWrapper
+from VisionCore.vision.genericYolo import Box, Results, GenericYolo
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig, VisionCoreCameraConfig
 
 class ObjectDetectionCamera(Camera):
@@ -69,7 +69,7 @@ class ObjectDetectionCamera(Camera):
 
         super().__init__(camera_config, self.fps_cap, self.input_size, self.grayscale)
 
-        self.model = YoloWrapper(
+        self.model = GenericYolo(
             self.yolo_model_file,
             self.core_mask,
             self.input_size,

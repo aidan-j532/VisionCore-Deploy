@@ -3,6 +3,9 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from VisionCore.config.AutoOpt import recommend_format
+import os
+from pathlib import Path
+from ultralytics import YOLO
 
 try:
     from rknnlite.api import RKNNLite
@@ -34,15 +37,6 @@ class Results:
 
 
 def _convert_model(model_file: str, target_format: str, input_size: tuple) -> str:
-    """
-    Converts a .pt model to the target format using ultralytics export.
-    Returns the path to the converted model.
-    Skips conversion if the output already exists.
-    """
-    import os
-    from pathlib import Path
-    from ultralytics import YOLO
-
     stem = Path(model_file).stem
     parent = Path(model_file).parent
 
@@ -86,7 +80,7 @@ def _convert_model(model_file: str, target_format: str, input_size: tuple) -> st
     return model_file
 
 
-class YoloWrapper:
+class GenericYolo:
     def __init__(self, model_file: str, core_mask, input_size=(640, 640), quantized: bool = False):
         self.model_file = model_file
         self.input_size = input_size

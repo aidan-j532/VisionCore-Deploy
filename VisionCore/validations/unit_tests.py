@@ -75,7 +75,7 @@ sys.modules["scipy.spatial.transform"] = scipy_transform
 
 # Now import the modules under test
 from VisionCore.config.AutoOpt import recommend_format
-from VisionCore.vision.genericYolo import YoloWrapper, Box, Results
+from VisionCore.vision.genericYolo import GenericYolo, Box, Results
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -130,11 +130,6 @@ class TestAutoOpt(unittest.TestCase):
         fmt = recommend_format()
         self.assertIn(fmt, known, f"Unknown format: {fmt}")
 
-    def test_rknn_wins_when_rknn_available(self):
-        # rknnlite is already faked in sys.modules so has_rockchip_npu() returns True
-        fmt = recommend_format()
-        self.assertEqual(fmt, "rknn")
-
     def test_openvino_when_intel_no_npu(self):
         import VisionCore.config.AutoOpt as ao
         with patch.object(ao, "has_rockchip_npu", return_value=False), \
@@ -158,17 +153,23 @@ class TestAutoOpt(unittest.TestCase):
              patch.object(ao, "has_nvidia",       return_value=True):
             self.assertEqual(ao.recommend_format(), "onnx")
 
+    def test_rknn_wins_when_rknn_available(self):
+        import VisionCore.config.AutoOpt as ao
+        with patch.object(ao, "has_rockchip_npu", return_value=True):
+            self.assertEqual(ao.recommend_format(), "rknn")
+
     def test_tflite_fallback_arm(self):
         import VisionCore.config.AutoOpt as ao
         with patch.object(ao, "has_rockchip_npu", return_value=False), \
-             patch.object(ao, "has_edge_tpu",     return_value=False), \
-             patch.object(ao, "has_hailo_npu",    return_value=False), \
-             patch.object(ao, "has_intel_vpu",    return_value=False), \
-             patch.object(ao, "has_apple_silicon",return_value=False), \
-             patch.object(ao, "has_nvidia",       return_value=False), \
-             patch.object(ao, "has_amd_gpu",      return_value=False), \
-             patch.object(ao, "has_intel",        return_value=False), \
-             patch.object(ao, "has_arm",          return_value=True):
+            patch.object(ao, "has_edge_tpu",     return_value=False), \
+            patch.object(ao, "has_hailo_npu",    return_value=False), \
+            patch.object(ao, "has_intel_vpu",    return_value=False), \
+            patch.object(ao, "has_apple_silicon",return_value=False), \
+            patch.object(ao, "has_nvidia",       return_value=False), \
+            patch.object(ao, "has_amd_gpu",      return_value=False), \
+            patch.object(ao, "has_intel",        return_value=False), \
+            patch.object(ao, "has_intel_gpu",    return_value=False), \
+            patch.object(ao, "has_arm",          return_value=True):
             self.assertEqual(ao.recommend_format(), "tflite")
 
 
@@ -213,7 +214,7 @@ class TestYoloWrapperUltralytics(unittest.TestCase):
 
     def _make_wrapper(self, model_file="model.onnx"):
         # ONNX path skips conversion and goes straight to ultralytics backend
-        return YoloWrapper(model_file, core_mask=0, input_size=(320, 320))
+        return GenericYolo(model_file, core_mask=0, input_size=(320, 320))
 
     def test_loads_onnx_without_conversion(self):
         w = self._make_wrapper("model.onnx")
@@ -256,7 +257,7 @@ class TestYoloWrapperUltralytics(unittest.TestCase):
 
     def test_init_raises_on_unsupported_model_file(self):
         with self.assertRaises(ValueError):
-            YoloWrapper("model.foo", core_mask=0, input_size=(320, 320))
+            GenericYolo("model.foo", core_mask=0, input_size=(320, 320))
 
     def test_convert_ultralytics_result_multiple_boxes(self):
         w = self._make_wrapper("model.onnx")
@@ -275,7 +276,7 @@ class TestYoloWrapperUltralytics(unittest.TestCase):
 class TestYoloWrapperRKNN(unittest.TestCase):
 
     def _make_rknn_wrapper(self):
-        return YoloWrapper("model.rknn", core_mask=FakeRKNNLite.NPU_CORE_0, input_size=(320, 320))
+        return GenericYolo("model.rknn", core_mask=FakeRKNNLite.NPU_CORE_0, input_size=(320, 320))
 
     def test_loads_rknn(self):
         w = self._make_rknn_wrapper()
@@ -306,7 +307,7 @@ class TestYoloWrapperRKNN(unittest.TestCase):
         w.model.release.assert_called_once()
 
     def test_predict_preprocessed_raises_on_wrong_backend(self):
-        w = YoloWrapper("model.onnx", core_mask=0, input_size=(320, 320))
+        w = GenericYolo("model.onnx", core_mask=0, input_size=(320, 320))
         with self.assertRaises(RuntimeError):
             w.predict_preprocessed(np.zeros((1, 320, 320, 3), dtype=np.uint8), (320, 320, 3))
 
@@ -430,7 +431,7 @@ class TestYoloWrapperRKNN(unittest.TestCase):
 class TestYoloWrapperTFLite(unittest.TestCase):
 
     def setUp(self):
-        self.w = YoloWrapper("model.onnx", core_mask=0, input_size=(320, 320))
+        self.w = GenericYolo("model.onnx", core_mask=0, input_size=(320, 320))
         self.w.model_type = "tflite"
         self.w.model = MagicMock()
         self.w._tflite_inp = {"dtype": np.uint8, "index": 0}
@@ -467,7 +468,7 @@ class TestYoloWrapperTFLite(unittest.TestCase):
         tflite_mock = MagicMock(return_value=interp)
 
         with patch.dict(sys.modules, {"tflite_runtime.interpreter": types.SimpleNamespace(Interpreter=tflite_mock, load_delegate=lambda *args, **kwargs: [])}):
-            w = gy.YoloWrapper("model.tflite", core_mask=0, input_size=(320, 320))
+            w = gy.GenericYolo("model.tflite", core_mask=0, input_size=(320, 320))
 
         self.assertEqual(w.model_type, "tflite")
         self.assertEqual(w._tflite_inp["dtype"], np.uint8)
@@ -480,7 +481,7 @@ class TestYoloWrapperTFLite(unittest.TestCase):
 class TestLetterbox(unittest.TestCase):
 
     def setUp(self):
-        self.w = YoloWrapper("model.onnx", core_mask=0, input_size=(320, 320))
+        self.w = GenericYolo("model.onnx", core_mask=0, input_size=(320, 320))
 
     def test_letterbox_output_shape(self):
         img = make_frame(640, 480)
@@ -614,19 +615,19 @@ class TestYoloWrapperAutoFormat(unittest.TestCase):
         from VisionCore.vision import genericYolo as gy
         with patch.object(gy, "_convert_model", return_value="model.onnx") as mock_conv, \
              patch.object(gy, "recommend_format", return_value="onnx"):
-            w = YoloWrapper("model.pt", core_mask=0, input_size=(320, 320))
+            w = GenericYolo("model.pt", core_mask=0, input_size=(320, 320))
             mock_conv.assert_called_once_with("model.pt", "onnx", (320, 320))
 
     def test_onnx_skips_conversion(self):
         from VisionCore.vision import genericYolo as gy
         with patch.object(gy, "_convert_model") as mock_conv:
-            YoloWrapper("model.onnx", core_mask=0, input_size=(320, 320))
+            GenericYolo("model.onnx", core_mask=0, input_size=(320, 320))
             mock_conv.assert_not_called()
 
     def test_rknn_skips_conversion(self):
         from VisionCore.vision import genericYolo as gy
         with patch.object(gy, "_convert_model") as mock_conv:
-            YoloWrapper("model.rknn", core_mask=0, input_size=(320, 320))
+            GenericYolo("model.rknn", core_mask=0, input_size=(320, 320))
             mock_conv.assert_not_called()
 
 

@@ -3,11 +3,15 @@ import importlib.metadata
 from VisionCore import VisionCore
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig
 from VisionCore.validations.ez import unit_tests
+import os
 
 def main():
-    config_path = Path(__file__).parent / "config.json"
+    config_path = (
+        os.environ.get("VISIONCORE_CONFIG")
+        or Path.cwd() / "config.json"
+    )
     config = VisionCoreConfig(str(config_path))
-
+    
     # Load vision modules dynamically
     vision_entries = importlib.metadata.entry_points(group='visioncore_vision')
     vision_classes = {ep.name: ep.load() for ep in vision_entries}

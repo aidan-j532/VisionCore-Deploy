@@ -10,6 +10,8 @@ from VisionCore.web.Metrics import Metrics
 from VisionCore.web.healthReporter import HealthReporter
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig
 import signal
+from VisionCore.vision.ObjectDetectionCamera import ObjectDetectionCamera
+from VisionCore.trackers.Fuel import Fuel
 
 try:
     from rknnlite.api import RKNNLite
@@ -59,13 +61,10 @@ class VisionCore:
 
         # Load trackers
         tracker_entries = importlib.metadata.entry_points(group='visioncore_trackers')
-        self.trackers = {}
+        ep_map = {ep.name: ep for ep in tracker_entries}  # build once
         for tracker_name in config.get('trackers', []):
-            if tracker_name in {ep.name: ep for ep in tracker_entries}:
-                tracker_class = tracker_entries[tracker_name].load()
-                self.trackers[tracker_name] = tracker_class(config)
-            else:
-                self.logger.warning(f"Unknown tracker: {tracker_name}")
+            if tracker_name in ep_map:
+                self.trackers[tracker_name] = ep_map[tracker_name].load()(config)
 
         # Load utilities
         utility_entries = importlib.metadata.entry_points(group='visioncore_utilities')
