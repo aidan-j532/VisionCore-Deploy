@@ -13,7 +13,7 @@
     "stale_threshold": 1,
     "auto_opt": true,
     "vision_modules": ["object_detection"],
-    "trackers": ["fuel", "path_planner", "example_custom"],
+    "trackers": ["fuel", "path_planner"],
     "utilities": ["network_table", "video_recorder"],
     "vision_model": {
         "quantized": true,

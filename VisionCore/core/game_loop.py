@@ -11,7 +11,6 @@ def main():
         or Path.cwd() / "config.json"
     )
     config = VisionCoreConfig(str(config_path))
-    print("Loading configuration from:", config_path)
 
     # Load vision modules dynamically
     vision_entries = importlib.metadata.entry_points(group='visioncore_vision')

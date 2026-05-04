@@ -85,7 +85,10 @@ class VisionCoreConfig:
             self.logger.warning("Failed to load config from %s: %s", file_path, e)
             self.logger.info("Using default configuration.")
 
-    def get(self, *keys, default=None):
+    def get(self, key, default=None):
+        return self.config.get(key, default)
+
+    def get_nested(self, *keys, default=None):
         val = self.config
         try:
             for key in keys:
@@ -122,11 +125,11 @@ class VisionCoreConfig:
 
     def __getitem__(self, args):
         if isinstance(args, tuple):
-            return self.get(*args)
+            return self.get_nested(*args)
         return self.get(args)
 
     def __call__(self, *keys):
-        return self.get(*keys)
+        return self.get_nested(*keys)
 
     def __getattr__(self, item: str):
         if item.startswith("_") or item in {"config", "logger", "default_config", "camera_configs"}:

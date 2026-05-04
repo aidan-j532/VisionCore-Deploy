@@ -52,6 +52,8 @@ class VisionCore:
             self.logger.info("%d cameras — multi mode.", len(cameras))
             self.camera_handler = MultipleCameraHandler(cameras)
 
+        self.trackers = {}
+
         # Load trackers
         tracker_entries = importlib.metadata.entry_points(group='visioncore_trackers')
         ep_map = {ep.name: ep for ep in tracker_entries}  # build once
@@ -59,12 +61,14 @@ class VisionCore:
             if tracker_name in ep_map:
                 self.trackers[tracker_name] = ep_map[tracker_name].load()(config)
 
+        self.utilities = {}
+
         # Load utilities
         utility_entries = importlib.metadata.entry_points(group='visioncore_utilities')
-        self.utilities = {}
+        util_ep_map = {ep.name: ep for ep in utility_entries}
         for util_name in config.get('utilities', []):
-            if util_name in {ep.name: ep for ep in utility_entries}:
-                util_class = utility_entries[util_name].load()
+            if util_name in util_ep_map:
+                util_class = util_ep_map[util_name].load()
                 if util_name == 'network_table':
                     self.utilities[util_name] = util_class(config["network_tables_ip"]) if config["use_network_tables"] else None
                 elif util_name == 'video_recorder':
