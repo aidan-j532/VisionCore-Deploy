@@ -11,6 +11,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from VisionCore.config.AutoOpt import recommend_format
 from VisionCore.validations.validate_system import validate_system
+from VisionCore.validations.model_validator import enforce_model_organization
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig
 
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +39,7 @@ def search_for_config() -> str:
     return chosen
 
 def on_boot():
-    logger.info("Starting VisionCore boot sequence…")
+    logger.info("Starting VisionCore boot sequence...")
 
     # 1. Validate system
     if not validate_system():
@@ -50,7 +51,21 @@ def on_boot():
     config = VisionCoreConfig(config_file)
     logger.info("Loaded config from %s", config_file)
 
-    # 3. Auto-optimization
+    # 3. Enforce YOLO model organization
+    logger.info("Validating YOLO model organization...")
+    is_valid, corrected_model_path = enforce_model_organization(_REPO_ROOT, config.config)
+    
+    if not is_valid:
+        raise RuntimeError(
+            "YOLO model organization validation failed. "
+            "Ensure models are in YoloModels/[format]/[size]/ structure."
+        )
+    
+    if corrected_model_path:
+        config.config["vision_model"]["file_path"] = corrected_model_path
+        logger.info("Using model from filesystem: %s", corrected_model_path)
+
+    # 4. Auto-optimization (if enabled)
     if config.get("auto_opt"):
         best_format = recommend_format()
         logger.info("Auto-opt enabled. Recommended format: %s", best_format)
@@ -64,21 +79,29 @@ def on_boot():
 
         if optimized:
             chosen = str(optimized[0])
-            logger.info("Found optimised model(s): %s  →  using %s",
+            logger.info("Found optimised model(s): %s  ->  using %s",
                         [str(m) for m in optimized], chosen)
             config.set("model_path", chosen)
         else:
-            logger.warning("No %s models found in YoloModels/. Falling back to config path.", best_format)
+            logger.warning("No %s models found in YoloModels/. Using configured model.", best_format)
     else:
         logger.info("Auto-opt disabled.")
 
-    model_path = config.get("model_path")
-    if not model_path or not Path(model_path).exists():
-        raise FileNotFoundError(f"Model file not found: {model_path}")
+    # 5. Final model validation
+    model_path = config.get("vision_model", {}).get("file_path") or config.get("model_path")
+    if not model_path:
+        raise FileNotFoundError("No model path specified in config or found by auto-opt")
+    
+    model_full_path = Path(model_path)
+    if not model_full_path.is_absolute():
+        model_full_path = _REPO_ROOT / model_full_path
+    
+    if not model_full_path.exists():
+        raise FileNotFoundError(f"Model file not found: {model_full_path}")
 
     logger.info("Boot sequence complete. Model: %s", model_path)
 
-    # 4. Install service using the same Python interpreter that launched boot.py
+    # 6. Install service using the same Python interpreter that launched boot.py
     install_script = str(_BOOT_DIR / "install.py")
     try:
         subprocess.run([sys.executable, install_script], check=True, cwd=str(_REPO_ROOT))
