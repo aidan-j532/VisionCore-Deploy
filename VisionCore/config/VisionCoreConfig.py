@@ -38,6 +38,7 @@ class VisionCoreConfig:
                 "quantized": False,
                 "file_path": "model.pt",
                 "input_size": [640, 640],
+                "min_conf": 0.7
             },
             "vision_modules": ["object_detection"],
             "trackers": ["fuel", "path_planner"],

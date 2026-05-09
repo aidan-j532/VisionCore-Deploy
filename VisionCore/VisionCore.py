@@ -25,6 +25,8 @@ class VisionCore:
         self.config  = config
         self.shutdown_event = threading.Event()
 
+        print("Min confidence set to", config.get("min_conf", 0.5))
+
         os.makedirs("Outputs", exist_ok=True)
         logging.basicConfig(
             level=getattr(logging, config.get("log_level") or "INFO", logging.INFO),
@@ -176,6 +178,7 @@ class VisionCore:
                     cam_name = (camera.config.get("name", "Camera 1")
                                 if hasattr(camera, "config") else "Camera 1")
                     self.camera_app.set_frame(annotated_frame, camera_name=cam_name)
+                    self.camera_app.set_frame(annotated_frame)
                     flask_s = time.perf_counter() - t_f
 
                 if self.recorder and annotated_frame is not None:

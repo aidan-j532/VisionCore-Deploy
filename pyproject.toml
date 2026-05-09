@@ -13,6 +13,7 @@ license = "GPL-3.0"
 # Base deps — always installed.
 # rknn wheels are not listed here because they are not on PyPI.
 # install-dev.sh and install-deploy.sh pass --find-links to handle them.
+# Base dependencies = everything needed to run on the robot
 dependencies = [
     "numpy>=1.26.0",
     "opencv-python>=4.8.0",
@@ -24,29 +25,13 @@ dependencies = [
     "Pillow>=12.0.0",
     "flask>=3.0",
     "scikit-learn>=1.3.0",
-    "ultralytics>=8.3.0"
+    "ultralytics>=8.3.0",
+    "pyntcore>=2024.0.0",
+    "robotpy>=2024.0.0",
 ]
 
 [project.optional-dependencies]
-
-# ── pip install ".[deploy]"
-# Orange Pi runtime. Use install-deploy.sh which adds --find-links for RKNN.
-# rknn-toolkit-lite2 is listed here so pip resolves it when --find-links is
-# provided — it is silently skipped if the URL is not passed (e.g. on x86).
-deploy = [
-    "ultralytics>=8.3.0",
-    "pyntcore>=2024.0.0",
-    "robotpy>=2024.0.0",
-    "rknn-toolkit-lite2==2.3.2",
-]
-
-# ── pip install ".[dev]"
-# Dev machine (x86). Use install-dev.sh which adds --find-links for RKNN.
-# rknn-toolkit2 is listed here so pip resolves it when --find-links is provided.
 dev = [
-    "ultralytics>=8.3.0",
-    "pyntcore>=2024.0.0",
-    "robotpy>=2024.0.0",
     "torch>=2.0.0",
     "torchvision>=0.15.0",
     "tensorflow>=2.13.0",
@@ -56,15 +41,12 @@ dev = [
     "scipy>=1.10.0",
     "matplotlib>=3.8.0",
     "polars>=1.39.0",
-    "fast-histogram>=0.14",
     "plotly>=5.0",
     "snakeviz",
     "jupyter",
     "tensorboard",
 ]
 
-# ── pip install ".[metrics]" 
-# Adds plotly metrics dashboard to a deploy machine.
 metrics = [
     "plotly>=5.0",
 ]

@@ -4,12 +4,16 @@ from VisionCore.VisionCore import VisionCore
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig
 from VisionCore.validations.ez import unit_tests
 import os
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 def main():
     config_path = (
         os.environ.get("VISIONCORE_CONFIG")
         or Path.cwd() / "config.json"
     )
+    logging.info(f"Using config file: {config_path}")
     config = VisionCoreConfig(str(config_path))
 
     # Load vision modules dynamically
@@ -19,7 +23,7 @@ def main():
     cameras = []
     for cam_name in config.camera_configs:
         cam_config = config.camera_config(cam_name)
-        pipeline = cam_config.get('pipeline', 'object')
+        pipeline = cam_config.get('pipeline', 'object_detection')
         if pipeline in vision_classes:
             vision_class = vision_classes[pipeline]
             camera = vision_class(cam_config, config)

@@ -81,7 +81,7 @@ def _convert_model(model_file: str, target_format: str, input_size: tuple) -> st
 
 
 class GenericYolo:
-    def __init__(self, model_file: str, core_mask, input_size=(640, 640), quantized: bool = False):
+    def __init__(self, model_file: str, core_mask, input_size=(640, 640), quantized: bool = False, min_conf: float = 0.5):
         self.model_file = model_file
         self.input_size = input_size
         self.core_mask = core_mask
@@ -92,6 +92,7 @@ class GenericYolo:
         self._needs_sigmoid = None
 
         self.quantized = quantized
+        self.min_conf = min_conf
 
         # If a .pt is passed and auto_opt is on, convert to the best format
         if model_file.endswith(".pt"):
@@ -250,14 +251,18 @@ class GenericYolo:
 
         else:
             for frame in frames:
+                frame_copy = frame.copy()
                 result = self.model(
-                    frame,
+                    frame_copy,
                     verbose=False,
+                    show=False,
                     imgsz=(self.input_size[1], self.input_size[0]),
+                    conf=self.min_conf,
                 )
-                results_list.append(self._convert_ultralytics_to_results(result[0]))
-
-        return results_list if is_list else results_list[0]
+                # discard result[0].orig_img — it's been drawn on
+                result[0].orig_img = None
+                results_list.append(self._convert_ultralytics_to_results(result[0], frame))
+                return results_list if is_list else results_list[0]
 
     def _convert_rknn_outputs(self, frame_output: np.ndarray, orig_shape) -> Results:
         if frame_output.ndim == 3:
@@ -275,7 +280,7 @@ class GenericYolo:
         else:
             confs = frame_output[:, 4].copy()
 
-        conf_mask = confs >= 0.5
+        conf_mask = confs >= self.min_conf
         frame_output = frame_output[conf_mask]
         confs = confs[conf_mask]
 
@@ -328,7 +333,7 @@ class GenericYolo:
 
         return Results([boxes[i] for i in indices], orig_shape)
 
-    def _convert_ultralytics_to_results(self, ultralytics_result):
+    def _convert_ultralytics_to_results(self, ultralytics_result, original_frame):
         boxes = []
         for b in ultralytics_result.boxes:
             xyxy = np.asarray(b.xyxy)
@@ -350,7 +355,7 @@ class GenericYolo:
         boxes = []
         for det in detections:
             x1, y1, x2, y2, conf = det[0], det[1], det[2], det[3], det[4]
-            if float(conf) < 0.1:
+            if float(conf) < self.min_conf:
                 continue
             x1 = max(0, int((x1 - pad_x) / scale))
             y1 = max(0, int((y1 - pad_y) / scale))

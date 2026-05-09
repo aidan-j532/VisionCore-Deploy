@@ -74,6 +74,7 @@ class ObjectDetectionCamera(Camera):
             self.core_mask,
             self.input_size,
             quantized=self.quantized,
+            min_conf=self.min_confidence,
         )
 
         self._preproc_q: queue.Queue = queue.Queue(maxsize=1)
@@ -158,14 +159,13 @@ class ObjectDetectionCamera(Camera):
         x1, y1, x2, y2 = box.xyxy
         w_px = x2 - x1
         h_px = y2 - y1
-        if box.conf < self.min_confidence:
-            return False
         if x1 < self.margin or y1 < self.margin or x2 > (img_w - self.margin) or y2 > (img_h - self.margin):
             return False
         if h_px == 0:
             return False
         aspect = w_px / h_px
-        return 0.8 <= aspect <= 1.2
+        return True
+        # return 0.8 <= aspect <= 1.2
 
     def _box_to_robot_point(self, box: Box, img_w: int, img_h: int) -> np.ndarray | None:
         x1, y1, x2, y2 = box.xyxy
@@ -210,8 +210,8 @@ class ObjectDetectionCamera(Camera):
             except queue.Empty:
                 return self._last_result, self._last_frame
 
-            results        = self.model.predict_preprocessed(preprocessed, orig_shape)
-            annotated_frame = orig_frame
+            results = self.model.predict_preprocessed(preprocessed, orig_shape)
+            annotated_frame = orig_frame.copy()
             self._last_result = results
             self._last_frame  = annotated_frame
         else:
@@ -219,8 +219,9 @@ class ObjectDetectionCamera(Camera):
             if frame is None:
                 self.logger.warning("No frame available.")
                 return None, None
-            results         = self.model.predict(frame, orig_shape=frame.shape)
-            annotated_frame = frame.copy()
+            clean_frame = frame.copy()  # keep clean copy before prediction
+            results = self.model.predict(frame, orig_shape=frame.shape)
+            annotated_frame = clean_frame  # use untouched frame
             self._last_result = results
             self._last_frame  = annotated_frame
 
@@ -240,22 +241,25 @@ class ObjectDetectionCamera(Camera):
 
         return results, annotated_frame
 
-    def run(self) -> tuple[np.ndarray, np.ndarray | None]:
+    def run(self):
         data, frame = self.get_yolo_data()
         if data is None or frame is None:
             return np.empty((0, 2)), None
 
         img_h, img_w = frame.shape[:2]
         map_points = []
+        passed_boxes = []  # was missing
+
         for box in data.boxes:
             if not self._filter_box(box, img_w, img_h):
                 continue
             pt = self._box_to_robot_point(box, img_w, img_h)
             if pt is not None:
                 map_points.append(pt)
+                passed_boxes.append(box)
 
         return (np.array(map_points) if map_points else np.empty((0, 2))), frame
-
+    
     def run_with_supplied_data(self, data: Results) -> np.ndarray:
         img_h, img_w = data.orig_shape[:2]
         map_points = []

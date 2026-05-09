@@ -1,45 +1,27 @@
 {
-    "unit": "meter",
-    "dbscan": {
-        "elipson": 10,
-        "min_samples": 1
-    },
-    "distance_threshold": -1,
-    "network_tables_ip": "10.22.7.2",
-    "use_network_tables": false,
-    "app_mode": true,
-    "debug_mode": false,
-    "record_mode": true,
-    "stale_threshold": 1,
-    "auto_opt": true,
-    "vision_modules": ["object_detection"],
-    "trackers": ["fuel", "path_planner"],
-    "utilities": ["network_table", "video_recorder"],
-    "vision_model": {
-        "quantized": true,
-        "file_path": "YoloModels/v26/nano/model.rknn",
-        "input_size": [320, 320],
-        "margin": 0,
-        "min_conf": 0.6
-    },
-    "camera_configs": {
-        "Default": {
-            "name": "Default",
-            "x": 0,
-            "y": 0,
-            "height": 0,
-            "pitch": 0,
-            "yaw": 0,
-            "grayscale": false,
-            "fps_cap": 30,
-            "calibration": {
-                "size": 0,
-                "distance": 0,
-                "game_piece_size": 0,
-                "fov": 90
-            },
-            "source": 0,
-            "subsystem": "field"
-        }
+  "unit": "meter",
+  "use_network_tables": false,
+  "app_mode": true,
+  "debug_mode": true,
+  "record_mode": false,
+  "auto_opt": true,
+  "vision_model": {
+    "file_path": "yolov8n.pt",
+    "input_size": [640, 640],
+    "min_conf": 1
+  },
+  "camera_configs": {
+    "Webcam": {
+      "name": "Webcam",
+      "source": 0,
+      "fps_cap": 30,
+      "subsystem": "field",
+      "grayscale": false,
+      "x": 0, "y": 0, "height": 0, "pitch": 0, "yaw": 0,
+      "calibration": {
+        "size": 0, "distance": 0, "game_piece_size": 0, "fov": 70
+      },
+      "pipeline": "object_detection"
     }
+  }
 }
