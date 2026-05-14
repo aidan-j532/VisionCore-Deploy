@@ -94,6 +94,33 @@ class VisionCoreConfig:
                     "Both vision_model and april_tag configs present — ensure this is intentional."
                 )
 
+        required_trackers = {"fuel", "path_planner"}
+        required_utilities = {"video_recorder", "network_table"}
+
+        # Mapping: Item -> Target List Key
+        mapping = {
+            "fuel": "trackers",
+            "path_planner": "trackers",
+            "video_recorder": "utilities",
+            "network_table": "utilities"
+        }
+
+        missing = False
+        self.config.setdefault("trackers", [])
+        self.config.setdefault("utilities", [])
+
+        for item, target_key in mapping.items():
+            if item not in self.config[target_key]:
+                missing = True
+                self.logger.warning(
+                    f"{item} not in {target_key}. Re-adding required config."
+                )
+                self.config[target_key].append(item)
+
+        if missing:
+            self.save()
+
+
     def get_default_config(self) -> dict:
         return self.default_config
 
@@ -179,11 +206,6 @@ class VisionCoreConfig:
                 current_dict[key] = value
 
     def _configure_logging(self):
-        """Configure root logging according to the loaded config.
-
-        - Honor `log_level` (string like INFO, DEBUG)
-        - Optionally add a file handler for `log_file` (path relative to repo root)
-        """
         # Map level string to logging level
         level_str = self.config.get("log_level", "INFO")
         try:

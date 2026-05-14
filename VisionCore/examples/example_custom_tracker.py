@@ -8,7 +8,7 @@ class ExampleCustomTracker:
         self.object_count = 0
         self.logger.info("ExampleCustomTracker initialized")
 
-    def process_detections(self, detections):
+    def postprocess_detections(self, detections):
         self.object_count += len(detections)
         self.logger.info(f"Processed {len(detections)} detections. Total count: {self.object_count}")
 

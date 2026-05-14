@@ -28,6 +28,7 @@ class VisionCore:
     def __init__(self, cameras: list[ObjectDetectionCamera], config: VisionCoreConfig):
         self.cameras = cameras
         self.config  = config
+
         self.shutdown_event = threading.Event()
 
         os.makedirs("Outputs", exist_ok=True)
@@ -55,7 +56,8 @@ class VisionCore:
 
         # Load trackers
         tracker_entries = importlib.metadata.entry_points(group='visioncore_trackers')
-        ep_map = {ep.name: ep for ep in tracker_entries}  # build once
+        ep_map = {ep.name: ep for ep in tracker_entries} # build once
+        tracker_entries = {"fuel", "pathplanner"}
         for tracker_name in config.get('trackers', []):
             if tracker_name in ep_map:
                 self.trackers[tracker_name] = ep_map[tracker_name].load()(config)
@@ -78,10 +80,13 @@ class VisionCore:
                 self.logger.warning(f"Unknown utility: {util_name}")
 
         # Assign common ones
-        self.planner = self.trackers.get('path_planner')
-        self.fuel_tracker = self.trackers.get('fuel')
-        self.recorder = self.utilities.get('video_recorder')
-        self.network_handler = self.utilities.get('network_table')
+        try:
+            self.detectioncleanup = self.trackers.get('path_planner')
+            self.fuel_tracker = self.trackers.get('fuel')
+            self.recorder = self.utilities.get('video_recorder')
+            self.network_handler = self.utilities.get('network_table')
+        except Exception as e:
+            self.logger.exception(f"Couldn't assign default plugins: {e}")
 
         if config["app_mode"]:
             threading.Thread(target=self.camera_app.run, daemon=True).start()
@@ -170,7 +175,7 @@ class VisionCore:
             if self.recorder:
                 self.recorder.start(camera.input_size[0], camera.input_size[1])
 
-            self.logger.info("Solo mode — warming up…")
+            self.logger.info("Solo mode — warming up...")
             self.run_solo_vision(camera)
             self.logger.info("Warm-up complete.")
 
@@ -212,15 +217,25 @@ class VisionCore:
                     print(f"\rFPS: {1/loop_s:.1f} (no detections)   ", end="")
                     continue
 
-                _, fuel_list = self.planner.update_fuel_positions(fuel_list)
+                _, fuel_list = self.detectioncleanup.update_fuel_positions(fuel_list)
 
                 # Process with custom trackers
                 for tracker_name, tracker in self.trackers.items():
-                    if hasattr(tracker, 'process_detections'):
+                    if hasattr(tracker, 'poseprocess_detections'):
                         try:
                             tracker.process_detections(fuel_list)
                         except Exception as e:
                             self.logger.exception(f"Error in tracker {tracker_name}: {e}")
+                    elif hasattr(tracker, 'update_object_positions'):
+                        try:
+                            _, fuel_list = tracker.update_object_positions(fuel_list)
+                        except Exception as e:
+                            self.logger.exception(f"Error in tracker: {tracker_name}: {e}")
+                    elif hasattr(tracker, 'update_robot_position'):
+                        try:
+                            _, fuel_list = tracker.update_robot_position(fuel_list)
+                        except Exception as e:
+                            self.logger.exception(f"Error in tracker: {tracker_name}: {e}")
 
                 network_s = None
                 if self.network_handler:
@@ -312,7 +327,7 @@ class VisionCore:
                     print(f"\rFPS: {1/loop_s:.1f} (no detections)   ", end="")
                     continue
 
-                _, fuel_list = self.planner.update_fuel_positions(fuel_list)
+                _, fuel_list = self.detectioncleanup.update_fuel_positions(fuel_list)
 
                 # Process with custom trackers
                 for tracker_name, tracker in self.trackers.items():

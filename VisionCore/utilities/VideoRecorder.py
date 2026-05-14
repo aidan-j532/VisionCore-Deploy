@@ -19,7 +19,7 @@ def _best_codec():
     elif system == "darwin":
         return ("mp4v", ".mp4")
     else:
-        return ("mp4v", ".mp4") # safest cross-platform default
+        return ("MJPG", ".avi")
 
 class VideoRecorder:
     def __init__(
@@ -66,11 +66,9 @@ class VideoRecorder:
         if len(frame.shape) != 3:
             return None
 
-        # enforce BGR 3-channel
         if frame.shape[2] == 4:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
 
-        # enforce size consistency
         if self._size is not None:
             frame = cv2.resize(frame, self._size)
 
@@ -116,6 +114,18 @@ class VideoRecorder:
 
         logger.info("Recording started: %s", filename)
 
+    def _worker(self):
+        while True:
+            try:
+                frame = self._queue.get()
+                if frame is None:
+                    break
+                if self._writer:
+                    self._writer.write(frame)
+                self._queue.task_done()
+            except Exception as e:
+                logger.error(f"Error in video worker: {e}")
+
     def write(self, frame):
         if not self._started or self._stopped:
             return
@@ -124,12 +134,6 @@ class VideoRecorder:
 
         if self._frame_counter % self.downsample != 0:
             return
-
-        # FPS throttle (prevents FFmpeg overload)
-        now = time.time()
-        if now - self._last_emit < (1.0 / self.fps):
-            return
-        self._last_emit = now
 
         frame = self._clean_frame(frame)
         if frame is None:
@@ -157,32 +161,20 @@ class VideoRecorder:
             pass
 
         if self._thread:
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=15)
+
+        time.sleep(1.0)
 
         if self._writer:
             self._writer.release()
             self._writer = None
+
+        time.sleep(1.0)
+
+        self._started = False
 
         logger.info(
             "Recording stopped. Frames=%d Dropped=%d",
             self._frame_counter,
             self._dropped,
         )
-
-    def _worker(self):
-        while True:
-            try:
-                frame = self._queue.get(timeout=1.0)
-            except queue.Empty:
-                if self._stopped:
-                    break
-                continue
-
-            if frame is None:
-                break
-
-            if self._writer is not None:
-                try:
-                    self._writer.write(frame)
-                except Exception as e:
-                    logger.warning("Frame write failed: %s", e)

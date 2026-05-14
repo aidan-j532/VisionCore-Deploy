@@ -57,7 +57,7 @@ visioncore-boot = "VisionCore.boot.boot:on_boot"
 
 [project.entry-points.visioncore_trackers]
 fuel = "VisionCore.trackers.FuelTracker:FuelTracker"
-path_planner = "VisionCore.trackers.PathPlanner:PathPlanner"
+path_planner = "VisionCore.trackers.PathPlanner:DetectionCleanup"
 example_custom = "VisionCore.example_custom_tracker:ExampleCustomTracker"
 
 [project.entry-points.visioncore_vision]

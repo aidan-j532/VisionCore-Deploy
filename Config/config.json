@@ -6,7 +6,7 @@
     },
     "distance_threshold": 0.5,
     "network_tables_ip": "10.22.7.2",
-    "use_network_tables": true,
+    "use_network_tables": false,
     "app_mode": true,
     "debug_mode": false,
     "record_mode": true,

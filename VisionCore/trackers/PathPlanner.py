@@ -3,7 +3,7 @@ from .CustomDBScan import CustomDBScan
 from .Fuel import Fuel  # adjust import path as needed
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig
 
-class PathPlanner:
+class DetectionCleanup:
     def __init__(self, config: VisionCoreConfig):
         self.epsilon = config["dbscan"]["elipson"]
         self.min_samples = config["dbscan"]["min_samples"]

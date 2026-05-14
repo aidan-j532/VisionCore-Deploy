@@ -14,8 +14,7 @@ def main():
     repo_root = Path.cwd()
     
     config_path = (
-        os.environ.get("VISIONCORE_CONFIG")
-        or repo_root / "config.json"
+        repo_root / "Config" / "config.json"
     )
     logger.info(f"Using config file: {config_path}")
     config = VisionCoreConfig(str(config_path))
