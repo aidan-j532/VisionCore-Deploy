@@ -3,91 +3,170 @@ import threading
 import queue
 import time
 import os
+import platform
 import logging
+import numpy as np
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+def _best_codec():
+    system = platform.system().lower()
+
+    if system == "windows":
+        return ("mp4v", ".mp4")
+    elif system == "darwin":
+        return ("mp4v", ".mp4")
+    else:
+        return ("mp4v", ".mp4") # safest cross-platform default
 
 class VideoRecorder:
     def __init__(
         self,
-        output_dir: str = "Video",
-        fps: float = 30.0,
-        codec: str = "mp4v",
-        max_queue: int = 60,      # max buffered frames, drop if full to avoid memory bloat
-        downsample: int = 1,      # write every Nth frame
+        output_dir="VideoRecordings",
+        fps=30.0,
+        codec=None,
+        extension=None,
+        max_queue=300,
+        downsample=1,
     ):
         self.output_dir = output_dir
         self.fps = fps
-        self.codec = codec
-        self.max_queue = max_queue
-        self.downsample = downsample
+        self.downsample = max(1, downsample)
 
-        self._queue: queue.Queue = queue.Queue(maxsize=max_queue)
-        self._writer: cv2.VideoWriter | None = None
-        self._thread: threading.Thread | None = None
-        self._stopped = False
+        self._forced_codec = codec
+        self._forced_ext = extension
+
+        self._queue = queue.Queue(maxsize=max_queue)
+        self._writer = None
+        self._thread = None
+
         self._started = False
+        self._stopped = False
+
         self._frame_counter = 0
         self._dropped = 0
-        self.logger = logging.getLogger(__name__)
+
+        self._size = None
+        self._last_emit = 0
 
         os.makedirs(output_dir, exist_ok=True)
+
+    def _clean_frame(self, frame):
+        if frame is None:
+            return None
+
+        if not isinstance(frame, np.ndarray):
+            return None
+
+        if frame.dtype != np.uint8:
+            frame = frame.astype(np.uint8)
+
+        if len(frame.shape) != 3:
+            return None
+
+        # enforce BGR 3-channel
+        if frame.shape[2] == 4:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+
+        # enforce size consistency
+        if self._size is not None:
+            frame = cv2.resize(frame, self._size)
+
+        return np.ascontiguousarray(frame)
 
     def start(self, width: int, height: int):
         if self._started:
             return
 
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = os.path.join(self.output_dir, f"recording_{timestamp}.mp4")
+        self._size = (width, height)
 
-        fourcc = cv2.VideoWriter_fourcc(*self.codec)
+        codec, ext = (self._forced_codec, self._forced_ext)
+        if not codec or not ext:
+            codec, ext = _best_codec()
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = os.path.join(self.output_dir, f"recording_{timestamp}{ext}")
+
+        fourcc = cv2.VideoWriter_fourcc(*codec)
+
         self._writer = cv2.VideoWriter(filename, fourcc, self.fps, (width, height))
 
+        # fallback if needed
         if not self._writer.isOpened():
-            self.logger.error(f"VideoWriter failed to open: {filename}")
+            logger.warning("Primary codec failed, switching to MJPG fallback")
+
+            codec, ext = ("MJPG", ".avi")
+            filename = os.path.join(self.output_dir, f"recording_{timestamp}{ext}")
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+
+            self._writer = cv2.VideoWriter(filename, fourcc, self.fps, (width, height))
+
+        if not self._writer.isOpened():
+            logger.error("VideoWriter failed completely.")
             self._writer = None
             return
 
         self._started = True
         self._stopped = False
-        self._thread = threading.Thread(target=self._worker, daemon=True, name="VideoRecorder")
+
+        self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
-        self.logger.info(f"Recording started: {filename} @ {width}x{height} {self.fps}fps")
+
+        logger.info("Recording started: %s", filename)
 
     def write(self, frame):
-        if not self._started or self._stopped or frame is None:
+        if not self._started or self._stopped:
             return
 
         self._frame_counter += 1
+
         if self._frame_counter % self.downsample != 0:
-            return  # skip this frame per downsample ratio
+            return
+
+        # FPS throttle (prevents FFmpeg overload)
+        now = time.time()
+        if now - self._last_emit < (1.0 / self.fps):
+            return
+        self._last_emit = now
+
+        frame = self._clean_frame(frame)
+        if frame is None:
+            return
 
         try:
+            if self._queue.full():
+                # drop oldest frame instead of crashing pipeline
+                self._queue.get_nowait()
+
             self._queue.put_nowait(frame)
+
         except queue.Full:
             self._dropped += 1
-            if self._dropped % 100 == 1:
-                self.logger.warning(
-                    f"VideoRecorder queue full — dropped {self._dropped} frames total. "
-                    "Consider increasing max_queue or downsample ratio."
-                )
 
     def stop(self):
         if not self._started:
             return
 
         self._stopped = True
-        self._queue.put(None)  # sentinel to unblock the worker
 
-        if self._thread is not None:
-            self._thread.join(timeout=10)
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
 
-        if self._writer is not None:
+        if self._thread:
+            self._thread.join(timeout=5)
+
+        if self._writer:
             self._writer.release()
             self._writer = None
 
-        self.logger.info(
-            f"Recording stopped. Total frames written: {self._frame_counter - self._dropped}, "
-            f"dropped: {self._dropped}"
+        logger.info(
+            "Recording stopped. Frames=%d Dropped=%d",
+            self._frame_counter,
+            self._dropped,
         )
 
     def _worker(self):
@@ -99,8 +178,11 @@ class VideoRecorder:
                     break
                 continue
 
-            if frame is None:  # sentinel
+            if frame is None:
                 break
 
             if self._writer is not None:
-                self._writer.write(frame)
+                try:
+                    self._writer.write(frame)
+                except Exception as e:
+                    logger.warning("Frame write failed: %s", e)
