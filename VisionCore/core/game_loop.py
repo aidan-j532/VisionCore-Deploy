@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def main():
+    repo_root = Path.cwd()
     plugin_root = Path(_plugins_pkg.__file__).resolve().parent
 
     vision_classes = load_plugins(plugin_root / "vision", VisionBase)
