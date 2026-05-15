@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 _BOOT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _BOOT_DIR.parents[1]
+_REPO_ROOT = Path.cwd()
 
 logging.basicConfig(level=logging.WARNING)
 

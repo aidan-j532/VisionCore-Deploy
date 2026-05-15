@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 _BOOT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _BOOT_DIR.parents[1] 
+_REPO_ROOT = Path.cwd()
 
 if str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
