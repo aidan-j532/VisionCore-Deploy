@@ -5,12 +5,14 @@ import time
 import logging
 import threading
 import queue
-
 from VisionCore.vision.Camera import Camera
+from VisionCore.plugins.bases import VisionBase
 from VisionCore.vision.genericYolo import Box, Results, GenericYolo
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig, VisionCoreCameraConfig
 
-class ObjectDetectionCamera(Camera):
+class ObjectDetectionCamera(Camera, VisionBase):
+    plugin_name = "object_detection"
+
     def __init__(
         self,
         camera_config: VisionCoreCameraConfig,

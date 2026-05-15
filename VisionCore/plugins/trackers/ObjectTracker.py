@@ -1,31 +1,30 @@
 import numpy as np
-from .Fuel import Fuel
-from VisionCore.config.VisionCoreConfig import VisionCoreConfig
+import logging
 
-# 0.3 means the tracked position moves 30% toward each new detectio, smooth but responsive.
+from VisionCore.plugins.bases import TrackerBase
+from VisionCore.config.VisionCoreConfig import VisionCoreConfig
+from VisionCore.vision.Fuel import Fuel
+
 _EMA_ALPHA = 0.3
 
-class FuelTracker:
+class ObjectTracker(TrackerBase):
+    plugin_name = "object_tracker"
+
     def __init__(self, config: VisionCoreConfig):
+        self.logger = logging.getLogger(__name__)
+
         self.fuel_list: list[Fuel] = []
 
-        raw_threshold = config["distance_threshold"]
+        raw_threshold = config.get("distance_threshold", 0.5)
         if raw_threshold is None or raw_threshold < 0:
-            self.logger_warning = True
             self.distance_threshold = 0.5
+            self.logger.warning(
+                "distance_threshold invalid or missing, defaulting to 0.5"
+            )
         else:
-            self.logger_warning = False
             self.distance_threshold = float(raw_threshold)
 
-        self.stale_threshold = config.get("stale_threshold") or 1.0
-
-        import logging
-        self.logger = logging.getLogger(__name__)
-        if self.logger_warning:
-            self.logger.warning(
-                "distance_threshold is negative or unset in config; "
-                "defaulting to 0.5 m to prevent unbounded fuel list growth."
-            )
+        self.stale_threshold = float(config.get("stale_threshold", 1.0))
 
     def update(
         self,
@@ -34,33 +33,55 @@ class FuelTracker:
         robot_y: float,
         robot_yaw: float,
     ) -> list[Fuel]:
+
+        # age + cleanup
         for fuel in self.fuel_list:
             fuel.update()
+
         self.fuel_list = [f for f in self.fuel_list if not f.destroyed]
 
+        # convert detections into robot frame
         for fuel in new_fuel_list:
             fuel.relative_to(robot_x, robot_y, robot_yaw)
 
+        # merge
         self._merge(new_fuel_list)
-        return self.fuel_list
 
+        return self.fuel_list
+    
     def _merge(self, fuels: list[Fuel]):
         for fuel in fuels:
-            if not self._already_exists(fuel):
+            if not self._exists_and_update(fuel):
                 fuel.alive_time = self.stale_threshold
                 self.fuel_list.append(fuel)
 
-    def _already_exists(self, new_fuel: Fuel) -> bool:
+    def _exists_and_update(self, new_fuel: Fuel) -> bool:
         if not self.fuel_list:
             return False
+
         new_pos = np.array(new_fuel.get_position())
+
         for existing in self.fuel_list:
-            if np.linalg.norm(new_pos - np.array(existing.get_position())) < self.distance_threshold:
+            existing_pos = np.array(existing.get_position())
+
+            if np.linalg.norm(new_pos - existing_pos) < self.distance_threshold:
+
+                # reset timer
                 existing.reset_time()
-                existing.x = existing.x + _EMA_ALPHA * (new_fuel.x - existing.x)
-                existing.y = existing.y + _EMA_ALPHA * (new_fuel.y - existing.y)
+
+                # EMA smoothing
+                existing.x += _EMA_ALPHA * (new_fuel.x - existing.x)
+                existing.y += _EMA_ALPHA * (new_fuel.y - existing.y)
+
                 return True
+
         return False
 
     def get_fuel_list(self) -> list[Fuel]:
         return self.fuel_list
+
+    def run(self):
+        return self.fuel_list
+
+    def stop(self):
+        self.fuel_list.clear()

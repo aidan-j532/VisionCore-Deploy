@@ -207,8 +207,7 @@ def _check_for_standalone_models(repo_root: Path, result: ModelValidationResult)
                 "cannot infer yolo parameters - model is standalone in repo root. "
                 f"Move to YoloModels/[format]/[size]/ (e.g., YoloModels/pytorch/nano/)"
             )
-            logger.warning(f"[STANDALONE] {rel_path}")
-            logger.warning(f"            Cannot infer YOLO parameters for standalone model")
+            logger.warning(f"[STANDALONE] {rel_path} - Cannot infer YOLO parameters for standalone model")
     
     # Check if there are model files in YoloModels root
     yolo_dir = repo_root / "YoloModels"
@@ -224,8 +223,7 @@ def _check_for_standalone_models(repo_root: Path, result: ModelValidationResult)
                     "cannot infer yolo parameters - model is in YoloModels root. "
                     f"Move to YoloModels/[format]/[size]/ (e.g., YoloModels/pytorch/nano/)"
                 )
-                logger.warning(f"[STANDALONE] {rel_path}")
-                logger.warning(f"            Cannot infer YOLO parameters - move to organized directory")
+                logger.warning(f"[STANDALONE] {rel_path} - Cannot infer YOLO parameters - move to organized directory")
 
 def validate_config_model_paths(config: Dict, repo_root: Path, 
                                validation_result: ModelValidationResult) -> str:

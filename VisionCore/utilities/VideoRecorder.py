@@ -10,7 +10,6 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-
 def _best_codec():
     system = platform.system().lower()
 

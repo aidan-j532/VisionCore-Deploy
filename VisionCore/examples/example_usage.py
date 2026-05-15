@@ -1,31 +1,46 @@
-# This is a example usage of how to use VisionCore
-# Made by the one and only Aidan Jensen (yes he is real I know I seem fake cause I mog so hard but I promis I'm real)
-from VisionCore import VisionCore
-from VisionCore.vision.ObjectDetectionCamera import ObjectDetectionCamera
+from pathlib import Path
+import logging
+
+from VisionCore.VisionCore import VisionCore
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig
 from VisionCore.validations.ez import unit_tests
+from VisionCore.validations.model_validator import enforce_model_organization
+from VisionCore.plugins._loader import load_plugins
+from VisionCore.plugins.bases import VisionBase
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def main():
-    # Load config (you can also customize this)
-    config = VisionCoreConfig("example_config.json")
+    repo_root = Path.cwd()
 
-    # Create cameras (add/remove depending on your setup)
-    cameras = [
-        ObjectDetectionCamera(
-            config.camera_config("Camera 1"),
-            config,
-        ),
-        # Uncomment for multi-camera
-        # Camera(
-        #     config.camera_config("Camera 2"),
-        #     config,
-        # ),
-    ]
+    plugin_root = repo_root / "VisionCore" / "plugins"
+
+    vision_classes = load_plugins(plugin_root / "vision", VisionBase)
+
+    config_path = repo_root / "Config" / "config.json"
+    logger.info(f"Using config file: {config_path}")
+
+    config = VisionCoreConfig(str(config_path))
+
+    logger.info("Validating YOLO model organization...")
+    is_valid, corrected_model_path = enforce_model_organization(
+        repo_root, config.config
+    )
+
+    if corrected_model_path:
+        config.config["vision_model"]["file_path"] = corrected_model_path
+
+    cameras = []
+    for cam_name in config.camera_configs:
+        cam_config = config.camera_config(cam_name)
+        pipeline = cam_config.get("pipeline", "object_detection")
+
+        if pipeline in vision_classes:
+            cameras.append(vision_classes[pipeline](cam_config, config))
 
     vision = VisionCore(cameras, config)
-
     vision.run()
-
 
 if __name__ == "__main__":
     if not unit_tests():

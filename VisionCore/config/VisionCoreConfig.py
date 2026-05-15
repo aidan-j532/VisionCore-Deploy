@@ -1,12 +1,10 @@
 import json
 import logging
-import subprocess
 from pathlib import Path
 
 _BOOT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _BOOT_DIR.parents[1] # two levels up
+_REPO_ROOT = _BOOT_DIR.parents[1]
 
-# Minimal basic config to ensure early logs appear; real level/handlers configured from config file
 logging.basicConfig(level=logging.WARNING)
 
 class VisionCoreConfig:
@@ -14,44 +12,56 @@ class VisionCoreConfig:
         self.logger = logging.getLogger(__name__)
 
         self.default_config = {
-            "unit": "meter",
-            "dbscan": {"elipson": 0, "min_samples": 0},
-            "distance_threshold": 0.5,
-            "network_tables_ip": "10.22.7.2",
-            "use_network_tables": True,
-            "app_mode": True,
-            "debug_mode": False,
-            "record_mode": True,
-            "stale_threshold": 1.0,
-            "log_level": "INFO",
-            "auto_opt": True,
-            "log_file": "Outputs/log.txt",
-            "metrics": False,
-            "camera_matrix": [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
-            "dist_coeffs": [0, 0, 0, 0, 0],
-            "camera_configs": {
-                "default": {
-                    "name": "default",
-                    "x": 0, "y": 0, "height": 0, "pitch": 0, "yaw": 0,
-                    "grayscale": False,
-                    "fps_cap": -1,
-                    "calibration": {"size": 0, "distance": 0, "game_piece_size": 0, "fov": 0},
-                    "source": "/dev/video0",
-                    "subsystem": "field",
-                    "pipeline": "object_detection",
-                },
-            },
             "vision_model": {
-                "quantized": False,
-                "file_path": "YoloModels/pytorch/nano/dummy.pt",
-                "input_size": [640, 640],
-                "min_conf": 0.7
+                "file_path": "YoloModels\\pytorch\\nano\\dummy.pt",
+                "input_size": [
+                    640,
+                    640
+                ],
+                "min_conf": 0.5,
+                "margin": 10
             },
-            "vision_modules": ["object_detection"],
-            "trackers": ["fuel", "path_planner"],
-            "utilities": ["network_table", "video_recorder"],
+            "unit": "meter",
+            "debug_mode": True,
+            "dbscan": {
+                "elipson": 0.3,
+                "min_samples": 3
+            },
+            "distance_threshold": 0.5,
+            "stale_threshold": 1.0,
+            "record_mode": True,
+            "record_dir": "VideoRecordings",
+            "auto_opt": True,
+            "log_level": "INFO",
+            "log_file": "Outputs/log.txt",
+            "camera_configs": {
+                "defualt_cam": {
+                    "source": 0,
+                    "pipeline": "object_detection",
+                    "fps_cap": 30,
+                    "yaw": 0,
+                    "pitch": 0,
+                    "height": 1.0,
+                    "x": 0,
+                    "y": 0,
+                    "calibration": {
+                        "distance": 0.0,
+                        "game_piece_size": 0.0,
+                        "size": 0,
+                        "fov": 0
+                    }
+                }
+            },
+            "plugins": {
+                "trackers": [
+                    "object_tracker"
+                ],
+                "utilities": [
+                    "video_recorder"
+                ]
+            }
         }
-        self.config = json.loads(json.dumps(self.default_config))  # deep copy
+        self.config = json.loads(json.dumps(self.default_config))
         self.file_path = file_path
 
         if file_path:
@@ -63,22 +73,18 @@ class VisionCoreConfig:
         }
 
         self._check_config()
-        # Apply logging configuration after config is loaded
         try:
             self._configure_logging()
         except Exception:
-            # Never let logging configuration break initialization
             self.logger.exception("Failed to configure logging from config")
-    
+
     def search_for_config(self) -> str:
         config_dir = _REPO_ROOT / "Config"
         if not config_dir.exists():
             raise FileNotFoundError(f"Config directory not found at {config_dir}")
-
         config_files = list(config_dir.rglob("*.json"))
         if not config_files:
             raise FileNotFoundError("No .json config files found in Config/")
-
         chosen = str(config_files[0])
         self.logger.info("Found config files: %s  ->  using %s", config_files, chosen)
         return chosen
@@ -94,32 +100,22 @@ class VisionCoreConfig:
                     "Both vision_model and april_tag configs present — ensure this is intentional."
                 )
 
-        required_trackers = {"fuel", "path_planner"}
-        required_utilities = {"video_recorder", "network_table"}
+        self.config.setdefault("plugins", {})
+        self.config["plugins"].setdefault("trackers", [])
+        self.config["plugins"].setdefault("utilities", [])
 
-        # Mapping: Item -> Target List Key
-        mapping = {
-            "fuel": "trackers",
-            "path_planner": "trackers",
-            "video_recorder": "utilities",
-            "network_table": "utilities"
-        }
-
+        required_trackers = ["fuel", "path_planner"]
         missing = False
-        self.config.setdefault("trackers", [])
-        self.config.setdefault("utilities", [])
-
-        for item, target_key in mapping.items():
-            if item not in self.config[target_key]:
-                missing = True
+        for tracker in required_trackers:
+            if tracker not in self.config["plugins"]["trackers"]:
                 self.logger.warning(
-                    f"{item} not in {target_key}. Re-adding required config."
+                    "%s not in trackers list. Re-adding required tracker.", tracker
                 )
-                self.config[target_key].append(item)
+                self.config["plugins"]["trackers"].append(tracker)
+                missing = True
 
         if missing:
             self.save()
-
 
     def get_default_config(self) -> dict:
         return self.default_config
@@ -127,8 +123,10 @@ class VisionCoreConfig:
     def camera_config(self, cam_name: str) -> "VisionCoreCameraConfig":
         cfg = self.camera_configs.get(cam_name)
         if cfg is None:
-            raise KeyError(f"No camera config named '{cam_name}'. "
-                           f"Available: {list(self.camera_configs)}")
+            raise KeyError(
+                f"No camera config named '{cam_name}'. "
+                f"Available: {list(self.camera_configs)}"
+            )
         return cfg
 
     def load_from_file(self, file_path: str):
@@ -137,29 +135,30 @@ class VisionCoreConfig:
                 data = json.load(f)
             self._update_config(data)
         except Exception as e:
-            self.logger.warning("Failed to load config from %s: %s, searching for config", file_path, e)
-            config_file = self.search_for_config()
-
+            self.logger.warning(
+                "Failed to load config from %s: %s, searching for config", file_path, e
+            )
             try:
+                config_file = self.search_for_config()
                 with open(config_file, "r") as f:
                     data = json.load(f)
                 self._update_config(data)
-            except Exception as e:
-                self.logger.warning("Failed to find and load config from %s: %s", config_file, e)
-                self.logger.info("Using default configuration file: config.json")
+            except Exception as e2:
+                self.logger.warning(
+                    "Failed to find and load config: %s. Using defaults.", e2
+                )
         finally:
-            # Reconfigure logging in case log settings changed from the file
             try:
                 self._configure_logging()
             except Exception:
-                self.logger.exception("Failed to apply logging configuration after loading file")
+                self.logger.exception(
+                    "Failed to apply logging configuration after loading file"
+                )
 
     def save(self):
-        # Overwrite json file with current config
         if not self.file_path:
             self.logger.warning("No config file path set; saving to Config/config.json")
             self.file_path = str(_REPO_ROOT / "Config" / "config.json")
-        
         try:
             with open(self.file_path, "w") as f:
                 json.dump(self.config, f, indent=4)
@@ -195,7 +194,7 @@ class VisionCoreConfig:
             current_dict = self.config
         for key, value in data.items():
             if key == "camera_configs":
-                current_dict[key] = value  # always replace entirely
+                current_dict[key] = value
             elif (
                 isinstance(value, dict)
                 and key in current_dict
@@ -206,7 +205,6 @@ class VisionCoreConfig:
                 current_dict[key] = value
 
     def _configure_logging(self):
-        # Map level string to logging level
         level_str = self.config.get("log_level", "INFO")
         try:
             level = getattr(logging, str(level_str).upper(), logging.INFO)
@@ -214,15 +212,12 @@ class VisionCoreConfig:
             level = logging.INFO
 
         root = logging.getLogger()
-        # Remove existing handlers to avoid duplicate logs when reconfiguring
         for h in list(root.handlers):
             root.removeHandler(h)
-
         root.setLevel(level)
 
         fmt = logging.Formatter("%(asctime)s %(levelname)s:%(name)s:%(message)s")
 
-        # Stream handler
         sh = logging.StreamHandler()
         sh.setLevel(level)
         sh.setFormatter(fmt)
@@ -240,8 +235,9 @@ class VisionCoreConfig:
                 fh.setFormatter(fmt)
                 root.addHandler(fh)
             except Exception:
-                # If file handler can't be created, fall back to console only
-                self.logger.exception("Unable to create log file handler at %s", log_path)
+                self.logger.exception(
+                    "Unable to create log file handler at %s", log_path
+                )
 
     def __getitem__(self, args):
         if isinstance(args, tuple):
@@ -252,7 +248,12 @@ class VisionCoreConfig:
         return self.get_nested(*keys)
 
     def __getattr__(self, item: str):
-        if item.startswith("_") or item in {"config", "logger", "default_config", "camera_configs"}:
+        if item.startswith("_") or item in {
+            "config",
+            "logger",
+            "default_config",
+            "camera_configs",
+        }:
             raise AttributeError(item)
         val = self.get(item)
         if val is None:
@@ -261,22 +262,21 @@ class VisionCoreConfig:
 
 class VisionCoreCameraConfig:
     DEFAULTS = {
-        "name":       "default",
-        "x":          0,
-        "y":          0,
-        "height":     0,
-        "pitch":      0,
-        "yaw":        0,
-        "grayscale":  False,
-        "fps_cap":    30,
+        "name": "default",
+        "x": 0,
+        "y": 0,
+        "height": 0,
+        "pitch": 0,
+        "yaw": 0,
+        "grayscale": False,
+        "fps_cap": 30,
         "calibration": {"size": 0, "distance": 0, "game_piece_size": 0, "fov": 0},
-        "source":     "/dev/video0",
-        "subsystem":  "field",
+        "source": "/dev/video0",
+        "subsystem": "field",
     }
 
     def __init__(self, config_dict: dict = None):
-        import json
-        self.data = json.loads(json.dumps(self.DEFAULTS)) # deep copy
+        self.data = json.loads(json.dumps(self.DEFAULTS))
         if config_dict:
             self.data.update(config_dict)
 

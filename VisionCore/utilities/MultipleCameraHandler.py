@@ -1,4 +1,4 @@
-from VisionCore.vision.ObjectDetectionCamera import ObjectDetectionCamera
+from VisionCore.plugins.vision.ObjectDetectionCamera import ObjectDetectionCamera
 import cv2
 import numpy as np
 import logging

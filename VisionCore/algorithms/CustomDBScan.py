@@ -9,7 +9,7 @@ class CustomDBScan:
         
     def get_dbscan(self):
         if self.eps == 0:
-            # Even tho mathematically its a empty list [] 0 is our indicator for no clustering
+            # Even tho mathematically its a empty list [], 0 is our indicator for no clustering
             return [-1] * len(self.points)
         clusters = self.dbscan.fit_predict(self.points)
         return clusters

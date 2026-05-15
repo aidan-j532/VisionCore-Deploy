@@ -1,4 +1,3 @@
-import importlib.metadata
 from pathlib import Path
 from VisionCore.utilities.MultipleCameraHandler import MultipleCameraHandler
 import time
@@ -8,39 +7,51 @@ import logging
 import os
 import numpy as np
 from VisionCore.web.Metrics import Metrics
-from VisionCore.web.healthReporter import HealthReporter
 from VisionCore.config.VisionCoreConfig import VisionCoreConfig
 import signal
-from VisionCore.vision.ObjectDetectionCamera import ObjectDetectionCamera
-from VisionCore.trackers.Fuel import Fuel
+from VisionCore.plugins.vision.ObjectDetectionCamera import ObjectDetectionCamera
+from VisionCore.vision.Fuel import Fuel
 from VisionCore.validations.model_validator import (
     enforce_model_organization,
     validate_model_organization,
 )
+from VisionCore.plugins._loader import load_plugins
+from VisionCore.plugins.bases import TrackerBase, UtilityBase
+from wpimath.geometry import Pose2d
 
 try:
     from rknnlite.api import RKNNLite
+
     RKNN_FOUND = True
 except ImportError:
     RKNN_FOUND = False
 
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve()
+
+while not (PROJECT_ROOT / "plugins").exists():
+    PROJECT_ROOT = PROJECT_ROOT.parent
+
+_PLUGIN_ROOT = PROJECT_ROOT / "plugins"
+
 class VisionCore:
     def __init__(self, cameras: list[ObjectDetectionCamera], config: VisionCoreConfig):
         self.cameras = cameras
-        self.config  = config
+        self.config = config
 
         self.shutdown_event = threading.Event()
-
         os.makedirs("Outputs", exist_ok=True)
         self.logger = logging.getLogger(__name__)
 
-        signal.signal(signal.SIGINT,  lambda *_: self._handle_shutdown())
+        signal.signal(signal.SIGINT, lambda *_: self._handle_shutdown())
         signal.signal(signal.SIGTERM, lambda *_: self._handle_shutdown())
 
         self.metrics = Metrics() if config["metrics"] else None
 
-        self.camera_app = CameraApp(cameras=cameras, config=config) if config["app_mode"] else None
-        self.health     = HealthReporter(self.camera_app.app, config) if config["app_mode"] else None
+        self.camera_app = (
+            CameraApp(cameras=cameras, config=config) if config["app_mode"] else None
+        )
 
         if len(cameras) == 0:
             self.logger.warning("No cameras provided - vision will not run.")
@@ -52,94 +63,60 @@ class VisionCore:
             self.logger.info("%d cameras - multi mode.", len(cameras))
             self.camera_handler = MultipleCameraHandler(cameras)
 
+        tracker_classes = load_plugins(_PLUGIN_ROOT / "trackers", TrackerBase)
         self.trackers = {}
-
-        # Load trackers
-        tracker_entries = importlib.metadata.entry_points(group='visioncore_trackers')
-        ep_map = {ep.name: ep for ep in tracker_entries}
-        for tracker_name in config.get('trackers', []):
-            if tracker_name in ep_map:
-                self.trackers[tracker_name] = ep_map[tracker_name].load()(config)
-
-        self.utilities = {}
-
-        # Load utilities
-        utility_entries = importlib.metadata.entry_points(group='visioncore_utilities')
-        util_ep_map = {ep.name: ep for ep in utility_entries}
-        for util_name in config.get('utilities', []):
-            if util_name in util_ep_map:
-                util_class = util_ep_map[util_name].load()
-                if util_name == 'network_table':
-                    self.utilities[util_name] = util_class(config["network_tables_ip"]) if config["use_network_tables"] else None
-                elif util_name == 'video_recorder':
-                    self.utilities[util_name] = util_class(output_dir="VideoRecordings") if config["record_mode"] else None
-                else:
-                    self.utilities[util_name] = util_class(config)
+        for name in config.get("trackers", []):
+            if name in tracker_classes:
+                self.trackers[name] = tracker_classes[name](config)
             else:
-                self.logger.warning(f"Unknown utility: {util_name}")
+                self.logger.warning("Unknown tracker: %s", name)
 
-        # Assign common ones
-        try:
-            self.detectioncleanup = self.trackers.get('path_planner')
-            self.fuel_tracker = self.trackers.get('fuel')
-            self.recorder = self.utilities.get('video_recorder')
-            self.network_handler = self.utilities.get('network_table')
-        except Exception as e:
-            self.logger.exception(f"Couldn't assign default plugins: {e}")
+        # Grab the two built-in trackers by name for use in the loop
+        self._fuel_tracker = self.trackers.get("fuel")
+        self._detection_cleanup = self.trackers.get("path_planner")
+
+        context = {
+            "config": config,
+            "camera_app": self.camera_app,
+            "cameras": self.cameras,
+            "flask_app": self.camera_app.app if self.camera_app else None,
+        }
+
+        utility_classes = load_plugins(_PLUGIN_ROOT / "utilities", UtilityBase)
+        self.utilities = {}
+        for name in config.get("utilities", []):
+            if name in utility_classes:
+                try:
+                    self.utilities[name] = utility_classes[name](context)
+                except Exception:
+                    self.logger.exception("Failed to initialize utility: %s", name)
+            else:
+                self.logger.warning("Unknown utility: %s", name)
+
+        # Wire health reporter to network handler if both exist
+        health = self.utilities.get("health_reporter")
+        nt = self.utilities.get("network_table")
+        if health and nt:
+            health.set_network_handler(nt)
 
         if config["app_mode"]:
             threading.Thread(target=self.camera_app.run, daemon=True).start()
-            if self.health and cameras:
-                self.health.set_camera(cameras[0])
-            if self.network_handler and self.health:
-                self.health.set_network_handler(self.network_handler)
 
     def _handle_shutdown(self):
         if self.shutdown_event.is_set():
-            return  # already shutting down - ignore duplicate signals
-        self.logger.info("Shutdown signal received - stopping all plugins...")
+            return
+        self.logger.info("Shutdown signal received.")
         self.shutdown_event.set()
 
     def _stop_all_plugins(self):
-        plugins: dict[str, object] = {}
-        plugins.update(self.trackers)
-        plugins.update({k: v for k, v in self.utilities.items() if v is not None})
-
-        for name, plugin in plugins.items():
+        for name, plugin in {**self.trackers, **self.utilities}.items():
             if plugin is None:
                 continue
-            if hasattr(plugin, "stop") and callable(plugin.stop):
+            if hasattr(plugin, "stop"):
                 try:
-                    self.logger.info("Stopping plugin: %s", name)
                     plugin.stop()
                 except Exception:
-                    self.logger.exception("Error while stopping plugin '%s'", name)
-            else:
-                self.logger.debug("Plugin '%s' has no .stop() method - skipping", name)
-
-    def get_default_config(self):
-        return self.config.get_default_config()
-
-    def validate_vision_model(self, repo_root: Path | None = None) -> tuple[bool, str | None]:
-        if repo_root is None:
-            repo_root = Path(__file__).resolve().parents[1]
-
-        vision_model = self.config.config.get("vision_model", {})
-        configured_path = vision_model.get("file_path", "")
-
-        validation_result = validate_model_organization(repo_root)
-        if validation_result.orphan_models:
-            self.logger.warning("Found orphan vision model files not in organized structure:")
-            for orphan_path, orphan_reason in validation_result.orphan_models.items():
-                self.logger.warning("  %s: %s", orphan_path, orphan_reason)
-
-        is_valid, corrected_model_path = enforce_model_organization(repo_root, self.config.config)
-
-        if not is_valid:
-            self.logger.warning("Vision model validation failed. Relying on user-provided settings.")
-            self.logger.warning("configured: %s", configured_path)
-
-        return is_valid, corrected_model_path
+                    self.logger.exception("Error stopping plugin '%s'", name)
 
     def _record_metrics(self, **kwargs):
         if self.metrics:
@@ -152,6 +129,43 @@ class VisionCore:
     def _destroy_metrics(self):
         if self.metrics:
             self.metrics.destroy()
+
+    def _get_pose(self) -> Pose2d:
+        for util in self.utilities.values():
+            pose = util.get_robot_pose()
+            if pose is not None:
+                return pose
+        return Pose2d()
+
+    def _update_utilities(self, frame_data: dict):
+        for util in self.utilities.values():
+            try:
+                util.update(frame_data)
+            except Exception:
+                self.logger.exception("Utility update failed")
+
+    def _update_camera_app(self, frame, camera=None, handler=None):
+        if not self.camera_app or frame is None:
+            return
+        self.camera_app.set_frame(frame)
+        if camera:
+            cam_name = (
+                camera.config.get("name", "Camera 1")
+                if hasattr(camera, "config")
+                else "Camera 1"
+            )
+            self.camera_app.set_frame(frame, camera_name=cam_name)
+        if handler:
+            for i, cam in enumerate(handler.cameras):
+                cam_name = (
+                    cam.config.get("name", f"Camera {i+1}")
+                    if hasattr(cam, "config")
+                    else f"Camera {i+1}"
+                )
+                with handler._locks[i]:
+                    cached = handler._frames[i]
+                if cached is not None:
+                    self.camera_app.set_frame(cached.copy(), camera_name=cam_name)
 
     def numpy_to_fuel_list(self, positions: np.ndarray) -> list[Fuel]:
         return [Fuel(float(p[0]), float(p[1])) for p in positions]
@@ -172,16 +186,28 @@ class VisionCore:
             self.logger.exception("Solo-vision exception")
             return [], None
 
+    def validate_vision_model(self, repo_root: Path | None = None):
+        if repo_root is None:
+            repo_root = Path(__file__).resolve().parents[1]
+        validation_result = validate_model_organization(repo_root)
+        if validation_result.orphan_models:
+            for p, r in validation_result.orphan_models.items():
+                self.logger.warning("Orphan model %s: %s", p, r)
+        return enforce_model_organization(repo_root, self.config.config)
+
+    def get_default_config(self):
+        return self.config.get_default_config()
+
     def run(self, duration_s: float | None = None):
         if not self.cameras:
             self.logger.error("No cameras provided.")
             return
-
         if duration_s is not None:
+
             def _stop():
                 time.sleep(duration_s)
-                self.logger.info("Duration %.1fs reached - stopping.", duration_s)
                 self._handle_shutdown()
+
             threading.Thread(target=_stop, daemon=True).start()
 
         if len(self.cameras) == 1:
@@ -189,105 +215,97 @@ class VisionCore:
         else:
             self.run_multi_mode()
 
+    def _run_loop_body_solo(self, camera) -> dict:
+        t0 = time.perf_counter()
+        camera_lag_s = camera.get_frame_age()
+
+        t_vis = time.perf_counter()
+        fuel_list, frame = self.run_solo_vision(camera)
+        vision_s = time.perf_counter() - t_vis
+
+        pose = self._get_pose()
+        fuel_list = (
+            self._fuel_tracker.update(
+                fuel_list, pose.X(), pose.Y(), pose.rotation().radians()
+            )
+            if self._fuel_tracker
+            else fuel_list
+        )
+
+        self._update_camera_app(frame, camera=camera)
+
+        if self._detection_cleanup and fuel_list:
+            _, fuel_list = self._detection_cleanup.update_fuel_positions(fuel_list)
+
+        loop_s = time.perf_counter() - t0
+
+        return {
+            "fuel_list": fuel_list,
+            "frame": frame,
+            "fps": 1 / loop_s if loop_s > 0 else 0,
+            "loop_s": loop_s,
+            "vision_s": vision_s,
+            "camera_lag_s": camera_lag_s,
+            "detections": len(fuel_list),
+            "cameras": self.cameras,
+        }
+
+    def _run_loop_body_multi(self, handler) -> dict:
+        t0 = time.perf_counter()
+        ages = [cam.get_frame_age() for cam in handler.cameras]
+        camera_lag_s = sum(ages) / len(ages) if ages else 0.0
+
+        t_vis = time.perf_counter()
+        fuel_list, frame = self.run_multi_vision(handler)
+        vision_s = time.perf_counter() - t_vis
+
+        pose = self._get_pose()
+        fuel_list = (
+            self._fuel_tracker.update(
+                fuel_list, pose.X(), pose.Y(), pose.rotation().radians()
+            )
+            if self._fuel_tracker
+            else fuel_list
+        )
+
+        self._update_camera_app(frame, handler=handler)
+
+        if self._detection_cleanup and fuel_list:
+            _, fuel_list = self._detection_cleanup.update_fuel_positions(fuel_list)
+
+        loop_s = time.perf_counter() - t0
+
+        return {
+            "fuel_list": fuel_list,
+            "frame": frame,
+            "fps": 1 / loop_s if loop_s > 0 else 0,
+            "loop_s": loop_s,
+            "vision_s": vision_s,
+            "camera_lag_s": camera_lag_s,
+            "detections": len(fuel_list),
+            "cameras": self.cameras,
+        }
+
     def run_solo_mode(self):
         camera = self.cameras[0]
         try:
-            if self.recorder:
-                self.recorder.start(camera.input_size[0], camera.input_size[1])
-
             self.logger.info("Solo mode - warming up...")
             self.run_solo_vision(camera)
             self.logger.info("Warm-up complete.")
 
             while not self.shutdown_event.is_set():
-                t0 = time.perf_counter()
-
-                camera_lag_s = camera.get_frame_age()
-
-                t_vis = time.perf_counter()
-                fuel_list, annotated_frame = self.run_solo_vision(camera)
-                vision_s = time.perf_counter() - t_vis
-
-                if self.network_handler:
-                    pose = self.network_handler.get_robot_pose()
-                    fuel_list = self.fuel_tracker.update(
-                        fuel_list, pose.X(), pose.Y(), pose.rotation().radians()
-                    )
-                else:
-                    fuel_list = self.fuel_tracker.update(fuel_list, 0, 0, 0)
-
-                flask_s = None
-                if self.camera_app and annotated_frame is not None:
-                    t_f = time.perf_counter()
-                    cam_name = (camera.config.get("name", "Camera 1")
-                                if hasattr(camera, "config") else "Camera 1")
-                    self.camera_app.set_frame(annotated_frame, camera_name=cam_name)
-                    self.camera_app.set_frame(annotated_frame)
-                    flask_s = time.perf_counter() - t_f
-
-                if self.recorder and annotated_frame is not None:
-                    self.recorder.write(annotated_frame)
-
-                loop_s = time.perf_counter() - t0
-
-                if not fuel_list:
-                    self._record_metrics(loop_s=loop_s, vision_s=vision_s,
-                                         camera_lag_s=camera_lag_s, flask_s=flask_s)
-                    self._tick_metrics()
-                    print(f"\rFPS: {1/loop_s:.1f} (no detections)   ", end="")
-                    continue
-
-                _, fuel_list = self.detectioncleanup.update_fuel_positions(fuel_list)
-
-                # Process with custom trackers
-                for tracker_name, tracker in self.trackers.items():
-                    if hasattr(tracker, 'process_detections'):
-                        try:
-                            tracker.process_detections(fuel_list)
-                        except Exception as e:
-                            self.logger.exception(f"Error in tracker {tracker_name}: {e}")
-                    elif hasattr(tracker, 'update_object_positions'):
-                        try:
-                            _, fuel_list = tracker.update_object_positions(fuel_list)
-                        except Exception as e:
-                            self.logger.exception(f"Error in tracker {tracker_name}: {e}")
-                    elif hasattr(tracker, 'update_robot_position'):
-                        try:
-                            _, fuel_list = tracker.update_robot_position(fuel_list)
-                        except Exception as e:
-                            self.logger.exception(f"Error in tracker {tracker_name}: {e}")
-
-                network_s = None
-                if self.network_handler:
-                    t_n = time.perf_counter()
-                    self.network_handler.send_fuel_list(fuel_list, "vision_data", "VisionData")
-                    self.network_handler.send_data(1 / loop_s if loop_s > 0 else 0, "fps", "VisionData")
-                    self.network_handler.send_data(len(fuel_list), "num_detections", "VisionData")
-                    self.network_handler.send_data(camera_lag_s, "camera_lag", "VisionData")
-
-                    hopper = camera.get_data_for_subsystem("hopper")
-                    if hopper is not None:
-                        self.network_handler.send_boolean(hopper, "hopper_sees_object", "VisionData")
-                    network_s = time.perf_counter() - t_n
-
-                loop_s = time.perf_counter() - t0
-
-                health_s = None
-                if self.health:
-                    t_h = time.perf_counter()
-                    self.health.tick(fps=1 / loop_s if loop_s > 0 else 0,
-                                     vision_s=vision_s, detections=len(fuel_list))
-                    health_s = time.perf_counter() - t_h
-
-                self._record_metrics(loop_s=loop_s, vision_s=vision_s,
-                                     camera_lag_s=camera_lag_s, flask_s=flask_s,
-                                     network_s=network_s, health_s=health_s)
+                frame_data = self._run_loop_body_solo(camera)
+                self._update_utilities(frame_data)
+                self._record_metrics(
+                    loop_s=frame_data["loop_s"],
+                    vision_s=frame_data["vision_s"],
+                    camera_lag_s=frame_data["camera_lag_s"],
+                )
                 self._tick_metrics()
-                self.logger.debug("FPS: %.1f", 1 / loop_s)
-                print(f"\rFPS: {1/loop_s:.1f}   ", end="")
+                print(f"\rFPS: {frame_data['fps']:.1f}   ", end="")
 
         finally:
-            print()  # newline after the \r FPS line
+            print()
             self._stop_all_plugins()
             camera.destroy()
             self._destroy_metrics()
@@ -295,99 +313,26 @@ class VisionCore:
     def run_multi_mode(self):
         handler = self.camera_handler
         if handler is None:
-            self.logger.error("Multi-camera mode requested but camera handler failed to initialize.")
+            self.logger.error("Multi-camera handler not initialized.")
             return
         try:
-            if self.recorder:
-                h, w = handler.cameras[0].input_size[1], handler.cameras[0].input_size[0]
-                self.recorder.start(w, h)
-
             self.logger.info("Multi mode - warming up...")
             self.run_multi_vision(handler)
             self.logger.info("Warm-up complete.")
 
             while not self.shutdown_event.is_set():
-                t0 = time.perf_counter()
-
-                ages = [cam.get_frame_age() for cam in handler.cameras]
-                camera_lag_s = sum(ages) / len(ages) if ages else 0.0
-
-                t_vis = time.perf_counter()
-                fuel_list, combined_frame = self.run_multi_vision(handler)
-                vision_s = time.perf_counter() - t_vis
-
-                if self.network_handler:
-                    pose = self.network_handler.get_robot_pose()
-                    fuel_list = self.fuel_tracker.update(
-                        fuel_list, pose.X(), pose.Y(), pose.rotation().radians()
-                    )
-                else:
-                    fuel_list = self.fuel_tracker.update(fuel_list, 0, 0, 0)
-
-                flask_s = None
-                if self.camera_app and combined_frame is not None:
-                    t_f = time.perf_counter()
-                    self.camera_app.set_frame(combined_frame)
-                    for i, cam in enumerate(handler.cameras):
-                        cam_name = (cam.config.get("name", f"Camera {i+1}")
-                                    if hasattr(cam, "config") else f"Camera {i+1}")
-                        with handler._locks[i]:
-                            cached_frame = handler._frames[i]
-                        if cached_frame is not None:
-                            self.camera_app.set_frame(cached_frame.copy(), camera_name=cam_name)
-                    flask_s = time.perf_counter() - t_f
-
-                loop_s = time.perf_counter() - t0
-
-                if not fuel_list:
-                    self._record_metrics(loop_s=loop_s, vision_s=vision_s,
-                                         camera_lag_s=camera_lag_s, flask_s=flask_s)
-                    self._tick_metrics()
-                    print(f"\rFPS: {1/loop_s:.1f} (no detections)   ", end="")
-                    continue
-
-                _, fuel_list = self.detectioncleanup.update_fuel_positions(fuel_list)
-
-                # Process with custom trackers
-                for tracker_name, tracker in self.trackers.items():
-                    if hasattr(tracker, 'process_detections'):
-                        try:
-                            tracker.process_detections(fuel_list)
-                        except Exception as e:
-                            self.logger.exception(f"Error in tracker {tracker_name}: {e}")
-
-                network_s = None
-                if self.network_handler:
-                    t_n = time.perf_counter()
-                    self.network_handler.send_fuel_list(fuel_list, "vision_data", "VisionData")
-                    self.network_handler.send_data(1 / loop_s if loop_s > 0 else 0, "fps", "VisionData")
-                    self.network_handler.send_data(len(fuel_list), "num_detections", "VisionData")
-                    self.network_handler.send_data(camera_lag_s, "camera_lag", "VisionData")
-
-                    for cam in handler.cameras:
-                        hopper = cam.get_data_for_subsystem("hopper")
-                        if hopper is not None:
-                            self.network_handler.send_boolean(hopper, "hopper_sees_object", "VisionData")
-                    network_s = time.perf_counter() - t_n
-
-                loop_s = time.perf_counter() - t0
-
-                health_s = None
-                if self.health:
-                    t_h = time.perf_counter()
-                    self.health.tick(fps=1 / loop_s if loop_s > 0 else 0,
-                                     vision_s=vision_s, detections=len(fuel_list))
-                    health_s = time.perf_counter() - t_h
-
-                self._record_metrics(loop_s=loop_s, vision_s=vision_s,
-                                     camera_lag_s=camera_lag_s, flask_s=flask_s,
-                                     network_s=network_s, health_s=health_s)
+                frame_data = self._run_loop_body_multi(handler)
+                self._update_utilities(frame_data)
+                self._record_metrics(
+                    loop_s=frame_data["loop_s"],
+                    vision_s=frame_data["vision_s"],
+                    camera_lag_s=frame_data["camera_lag_s"],
+                )
                 self._tick_metrics()
-                self.logger.debug("FPS: %.1f", 1 / loop_s)
-                print(f"\rFPS: {1/loop_s:.1f}   ", end="")
+                print(f"\rFPS: {frame_data['fps']:.1f}   ", end="")
 
         finally:
-            print()  # newline after the \r FPS line
+            print()
             self._stop_all_plugins()
             handler.destroy()
             self._destroy_metrics()
