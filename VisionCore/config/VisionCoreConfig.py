@@ -13,13 +13,11 @@ class VisionCoreConfig:
 
         self.default_config = {
             "vision_model": {
-                "file_path": "YoloModels\\pytorch\\nano\\dummy.pt",
-                "input_size": [
-                    640,
-                    640
-                ],
+                "file_path": "YoloModels/pytorch/nano/dummy.pt",
+                "input_size": [640, 640],
                 "min_conf": 0.5,
-                "margin": 10
+                "margin": 10,
+                "quantized": False
             },
             "unit": "meter",
             "debug_mode": True,
@@ -29,13 +27,18 @@ class VisionCoreConfig:
             },
             "distance_threshold": 0.5,
             "stale_threshold": 1.0,
-            "record_mode": True,
+            "record_mode": False,
             "record_dir": "VideoRecordings",
             "auto_opt": True,
             "log_level": "INFO",
             "log_file": "Outputs/log.txt",
+            "use_network_tables": False,
+            "network_tables_ip": "10.0.0.2",
+            "metrics": False,
+            "app_mode": True,
             "camera_configs": {
-                "defualt_cam": {
+                "default_cam": {
+                    "name": "default_cam",
                     "source": 0,
                     "pipeline": "object_detection",
                     "fps_cap": 30,
@@ -44,6 +47,8 @@ class VisionCoreConfig:
                     "height": 1.0,
                     "x": 0,
                     "y": 0,
+                    "grayscale": False,
+                    "subsystem": "field",
                     "calibration": {
                         "distance": 0.0,
                         "game_piece_size": 0.0,
@@ -54,10 +59,13 @@ class VisionCoreConfig:
             },
             "plugins": {
                 "trackers": [
-                    "object_tracker"
+                    "object_tracker",
+                    "fuel",
+                    "path_planner"
                 ],
                 "utilities": [
-                    "video_recorder"
+                    "video_recorder",
+                    "health_reporter"
                 ]
             }
         }
@@ -104,7 +112,7 @@ class VisionCoreConfig:
         self.config["plugins"].setdefault("trackers", [])
         self.config["plugins"].setdefault("utilities", [])
 
-        required_trackers = ["fuel", "path_planner"]
+        required_trackers = ["path_planner"]
         missing = False
         for tracker in required_trackers:
             if tracker not in self.config["plugins"]["trackers"]:

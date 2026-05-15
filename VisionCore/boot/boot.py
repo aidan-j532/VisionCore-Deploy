@@ -149,16 +149,15 @@ def setup_files():
         default_config = VisionCoreConfig(str(config_file))
         default_config.save()
 
+    return config_file
 
 def on_boot():
     logger.info("Starting VisionCore boot sequence...")
-    setup_files()
-
+    config_path = setup_files()
+    
     if not validate_system():
         raise RuntimeError("System validation failed. Aborting boot.")
 
-    # Pass the path explicitly so VisionCoreConfig knows where to save
-    config_path = _REPO_ROOT / "Config" / "config.json"
     config = VisionCoreConfig(str(config_path))
 
     # 3. Enforce YOLO model organization, actually not doing this because this is boot
