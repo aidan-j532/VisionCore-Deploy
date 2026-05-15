@@ -126,20 +126,20 @@ def setup_files():
     config_dir.mkdir(exist_ok=True)
     config_file = config_dir / "config.json"
     if not config_file.exists():
-        default_config = VisionCoreConfig()
+        default_config = VisionCoreConfig(str(config_file))
         default_config.save()
-        logger.info(f"Created default config at {config_file}")
 
 def on_boot():
     logger.info("Starting VisionCore boot sequence...")
     setup_files()
-    # 1. Validate system
+
     if not validate_system():
         raise RuntimeError("System validation failed. Aborting boot.")
 
-    # 2. Theirs gonna be no config file, its boot
-    config = VisionCoreConfig()
-
+    # Pass the path explicitly so VisionCoreConfig knows where to save
+    config_path = _REPO_ROOT / "Config" / "config.json"
+    config = VisionCoreConfig(str(config_path))
+    
     # 3. Enforce YOLO model organization, actually not doing this because this is boot
     # is_valid, corrected_model_path = enforce_model_organization(_REPO_ROOT, config.config)
     
