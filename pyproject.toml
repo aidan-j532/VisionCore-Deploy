@@ -18,16 +18,6 @@ maintainers = [
     { name = "VisionCore Maintainer", email = "aidanrjensen@gmail.com" }
 ]
 
-urls = {
-    "Homepage" = "https://https://github.com/aidan-j532/VisionCore-Deploy",
-    "Repository" = "https://https://github.com/aidan-j532/VisionCore-Deploy",
-    "Bug Tracker" = "https://github.com/aidan-j532/VisionCore-Deploy/issues"
-}
-
-# Base deps — always installed.
-# rknn wheels are not listed here because they are not on PyPI.
-# install-dev.sh and install-deploy.sh pass --find-links to handle them.
-# Base dependencies = everything needed to run on the robot
 dependencies = [
     "numpy>=1.26.0",
     "opencv-python>=4.8.0",
@@ -41,7 +31,7 @@ dependencies = [
     "scikit-learn>=1.3.0",
     "ultralytics>=8.3.0",
     "pyntcore>=2024.0.0",
-    "robotpy>=2024.0.0",
+    "robotpy>=2024.0.0"
 ]
 
 [project.optional-dependencies]
@@ -62,12 +52,17 @@ dev = [
 ]
 
 metrics = [
-    "plotly>=5.0",
+    "plotly>=5.0"
 ]
 
 [project.scripts]
 visioncore-run  = "VisionCore.core.game_loop:main"
 visioncore-boot = "VisionCore.boot.boot:on_boot"
+
+[project.urls]
+Homepage = "https://github.com/aidan-j532/VisionCore-Deploy"
+Repository = "https://github.com/aidan-j532/VisionCore-Deploy"
+Bug-Tracker = "https://github.com/aidan-j532/VisionCore-Deploy/issues"
 
 [tool.setuptools.packages.find]
 include = ["VisionCore", "VisionCore.*"]
