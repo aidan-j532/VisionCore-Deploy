@@ -427,8 +427,7 @@ class GenericYolo:
             )
         return tensor
 
-    @staticmethod
-    def _apply_score_activation(scores: np.ndarray, are_logits: bool) -> np.ndarray:
+    def _apply_score_activation(self, scores: np.ndarray, are_logits: bool) -> np.ndarray:
         if scores.size == 0:
             return scores
         if not are_logits:

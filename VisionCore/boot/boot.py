@@ -5,15 +5,13 @@ import shutil
 import ultralytics
 
 _BOOT_DIR = Path(__file__).resolve().parent
-_PROJECT_ROOT = Path(os.environ.get(
-    "VISIONCORE_ROOT",
-    Path.cwd()
-)).resolve()
-_PACKAGE_ROOT = Path(__file__).resolve().parent
-_ASSETS_DIR = Path(sys.prefix) / "VisionCore" / "assets"
+_PROJECT_ROOT = Path(
+    os.environ.get("VISIONCORE_ROOT")
+    or Path.home() / "VisionCore"
+).resolve()
+PACKAGE_ROOT = Path(__file__).resolve().parent
+ASSETS_DIR = PACKAGE_ROOT / "assets"
 
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(_PROJECT_ROOT))
 import subprocess
 from VisionCore.config.AutoOpt import recommend_format
 from VisionCore.validations.validate_system import validate_system
