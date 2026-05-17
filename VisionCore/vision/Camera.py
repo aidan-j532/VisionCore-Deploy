@@ -8,7 +8,6 @@ from VisionCore.config.VisionCoreConfig import VisionCoreCameraConfig
 import platform
 
 class Camera:
-
     def __init__(
         self,
         camera_config: VisionCoreCameraConfig,

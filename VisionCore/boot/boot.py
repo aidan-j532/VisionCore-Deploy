@@ -3,11 +3,11 @@ import os
 from pathlib import Path
 import shutil
 import ultralytics
+from pathlib import Path
 
 _BOOT_DIR = Path(__file__).resolve().parent
-_PROJECT_ROOT = Path(
-    os.environ.get("VISIONCORE_ROOT") or Path.home() / "VisionCore"
-).resolve()
+
+_PROJECT_ROOT = Path.cwd().resolve()
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 _ASSETS_DIR = _PACKAGE_ROOT.parent / "assets"
 
@@ -191,8 +191,6 @@ def setup_files():
 
 
 def on_boot(install_service: bool = False, first_boot: bool = False):
-    os.chdir(_PROJECT_ROOT)
-
     if first_boot:
         logger.warning("First boot mode enabled. Resetting workspace...")
         reset_workspace()
