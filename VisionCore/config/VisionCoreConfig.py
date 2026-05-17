@@ -5,6 +5,7 @@ from pathlib import Path
 _BOOT_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = Path.cwd()
 
+
 class VisionCoreConfig:
     def __init__(self, file_path: str = None):
         self.logger = logging.getLogger(__name__)
@@ -16,14 +17,14 @@ class VisionCoreConfig:
                 "input_size": [640, 640],
                 "min_conf": 0.5,
                 "margin": 10,
-                "quantized": False
+                "quantized": False,
+                "task": "pose",  # Options: "detect", "pose", "segment"
+                "has_hardware_nms": False,  # True if End2End model, False if raw anchors
+                "num_classes": 1,
             },
             "unit": "meter",
             "debug_mode": True,
-            "dbscan": {
-                "elipson": 0.3,
-                "min_samples": 3
-            },
+            "dbscan": {"elipson": 0.3, "min_samples": 3},
             "distance_threshold": 0.5,
             "stale_threshold": 1.0,
             "record_mode": False,
@@ -52,21 +53,14 @@ class VisionCoreConfig:
                         "distance": 0.0,
                         "game_piece_size": 0.0,
                         "size": 0,
-                        "fov": 0
-                    }
+                        "fov": 0,
+                    },
                 }
             },
             "plugins": {
-                "trackers": [
-                    "object_tracker",
-                    "fuel",
-                    "path_planner"
-                ],
-                "utilities": [
-                    "video_recorder",
-                    "health_reporter"
-                ]
-            }
+                "trackers": ["object_tracker", "fuel", "path_planner"],
+                "utilities": ["video_recorder", "health_reporter"],
+            },
         }
         self.config = json.loads(json.dumps(self.default_config))
         self.file_path = file_path
@@ -167,7 +161,9 @@ class VisionCoreConfig:
             if self.file_path:
                 self.logger.info("Config saved to %s", self.file_path)
             else:
-                self.logger.info("No config file path set; saving to Config/config.json")
+                self.logger.info(
+                    "No config file path set; saving to Config/config.json"
+                )
                 self.file_path = str(_REPO_ROOT / "Config" / "config.json")
             with open(self.file_path, "w") as f:
                 json.dump(self.config, f, indent=4)
@@ -267,6 +263,7 @@ class VisionCoreConfig:
         if val is None:
             raise AttributeError(f"No config attribute or key named '{item}'")
         return val
+
 
 class VisionCoreCameraConfig:
     DEFAULTS = {

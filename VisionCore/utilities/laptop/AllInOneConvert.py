@@ -2,6 +2,8 @@ from ultralytics import YOLO
 import logging
 import os
 
+logger = logging.getLogger(__name__)
+
 EXPORT_CONFIGS = {
     "onnx": {
         "detect":   {"simplify": True, "opset": 17, "dynamic": False, "half": False},
@@ -50,7 +52,6 @@ def _export_ultralytics(file: str, format: str, task: str) -> str:
     export_path = model.export(format=format, **cfg)
     logger.info(f"Export complete -> {export_path}")
     return export_path
-
 
 def _export_rknn(onnx_file: str, task: str, dataset_txt: str, output_path: str = "model.rknn") -> str:
     try:
