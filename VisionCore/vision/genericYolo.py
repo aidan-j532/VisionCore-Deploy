@@ -1,4 +1,5 @@
 import logging
+
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -11,16 +12,113 @@ except ImportError:
     RKNN_FOUND = False
 
 
+def normalize_model_config(model_config: dict) -> dict:
+    """
+    Validate model_config. Tensor layout and postprocess behavior must be declared
+    in config — runtime only checks shapes against configured feature widths.
+    """
+    cfg = dict(model_config)
+    for key in ("file_path", "task", "num_classes", "input_size", "output"):
+        if key not in cfg:
+            raise ValueError(f"model_config must include '{key}'.")
+
+    task = cfg["task"]
+    if task not in ("detect", "pose"):
+        raise ValueError(f"Unsupported task '{task}'. Use 'detect' or 'pose'.")
+
+    num_classes = int(cfg["num_classes"])
+    if num_classes < 1:
+        raise ValueError("num_classes must be >= 1.")
+
+    out = dict(cfg["output"])
+    _validate_output_block(out, task, num_classes)
+    cfg["output"] = out
+
+    if "input" in cfg:
+        cfg["input"] = _validate_input_block(dict(cfg["input"]))
+
+    return cfg
+
+
+def _validate_input_block(inp: dict) -> dict:
+    layout = inp.get("layout")
+    if layout not in ("nhwc", "nchw"):
+        raise ValueError("input.layout must be 'nhwc' or 'nchw'.")
+
+    dtype = inp.get("dtype")
+    if dtype not in ("uint8", "float32"):
+        raise ValueError("input.dtype must be 'uint8' or 'float32'.")
+
+    if "letterbox" not in inp:
+        raise ValueError("input.letterbox is required (true or false).")
+
+    if inp["letterbox"] and "pad_value" not in inp:
+        raise ValueError("input.pad_value is required when input.letterbox is true.")
+
+    if "normalize" not in inp:
+        raise ValueError("input.normalize is required (true or false).")
+
+    if inp["normalize"] and "scale" not in inp:
+        raise ValueError("input.scale is required when input.normalize is true.")
+
+    return inp
+
+
+def _validate_output_block(out: dict, task: str, num_classes: int) -> None:
+    fmt = out.get("format")
+    if fmt not in ("hardware_nms", "raw"):
+        raise ValueError("output.format must be 'hardware_nms' or 'raw'.")
+
+    if "layout" not in out:
+        raise ValueError("output.layout is required ('anchors_first' or 'features_first').")
+    if out["layout"] not in ("anchors_first", "features_first"):
+        raise ValueError("output.layout must be 'anchors_first' or 'features_first'.")
+
+    if "quantization" not in out:
+        raise ValueError("output.quantization is required ('none', 'int8', or 'uint8').")
+    if out["quantization"] not in ("none", "int8", "uint8"):
+        raise ValueError("output.quantization must be 'none', 'int8', or 'uint8'.")
+    if out["quantization"] in ("int8", "uint8") and "quant_scale" not in out:
+        raise ValueError("output.quant_scale is required when output.quantization is int8 or uint8.")
+
+    if fmt == "hardware_nms":
+        return
+
+    for key in (
+        "box_format",
+        "score_mode",
+        "scores_are_logits",
+        "apply_software_nms",
+        "nms_iou",
+    ):
+        if key not in out:
+            raise ValueError(f"output.{key} is required for raw format.")
+
+    if out["box_format"] not in ("cxcywh", "xyxy"):
+        raise ValueError("output.box_format must be 'cxcywh' or 'xyxy'.")
+    if out["score_mode"] not in ("multi_class", "objectness"):
+        raise ValueError("output.score_mode must be 'multi_class' or 'objectness'.")
+    if out["score_mode"] == "objectness" and num_classes != 1:
+        raise ValueError("output.score_mode 'objectness' requires num_classes == 1.")
+
+    if task == "pose":
+        for key in ("num_keypoints", "keypoint_dims", "keypoint_scores_are_logits"):
+            if key not in out:
+                raise ValueError(f"output.{key} is required for task='pose'.")
+
+
 class Box:
-    def __init__(self, xyxy, conf, cls_id=0):
+    def __init__(self, xyxy, conf, cls_id=0, translation=None):
         self.xyxy = xyxy
         self.conf = conf
         self.cls_id = cls_id
+        # PnP translation (x, y, z); rotation is solved but not stored on Box.
+        self.translation = translation
 
 
 class Results:
     def __init__(
-        self, boxes: list[Box], orig_shape, keypoints: list[np.ndarray] = None
+        self, boxes: list[Box], orig_shape, keypoints: list[np.ndarray] | None = None
     ):
         self.boxes = boxes
         self.orig_shape = orig_shape
@@ -46,15 +144,19 @@ class Results:
 class GenericYolo:
     def __init__(self, model_config: dict, core_mask=None):
         self.logger = logging.getLogger(__name__)
+        cfg = normalize_model_config(model_config)
 
-        self.model_file = model_config["file_path"]
-        self.task = model_config.get("task", "detect")
-        self.has_hardware_nms = model_config.get("has_hardware_nms", False)
-        self.num_classes = model_config.get("num_classes", 80)
-        self.input_size = tuple(model_config.get("input_size", (640, 640)))
-        self.min_conf = model_config.get("min_conf", 0.25)
-        self.quantized = model_config.get("quantized", False)
+        self.model_file = cfg["file_path"]
+        self.task = cfg["task"]
+        self.num_classes = int(cfg["num_classes"])
+        self.input_size = tuple(cfg["input_size"])
+        self.min_conf = float(cfg["min_conf"]) if "min_conf" in cfg else 0.25
+        self.output = cfg["output"]
+        self.pnp_config = cfg.get("pnp")
+        self.input = cfg.get("input")
+        self._preprocess_buf: np.ndarray | None = None
 
+        self.has_hardware_nms = self.output["format"] == "hardware_nms"
         self.model_type = None
 
         if self.model_file.endswith(".rknn"):
@@ -62,7 +164,7 @@ class GenericYolo:
                 raise ImportError(
                     "rknnlite not installed but .rknn model was specified."
                 )
-
+            self._require_input_block()
             self.model_type = "rknn"
             self.model = RKNNLite()
 
@@ -72,37 +174,65 @@ class GenericYolo:
             if self.model.init_runtime(core_mask=core_mask) != 0:
                 raise ValueError(f"Failed to init RKNN runtime: {self.model_file}")
 
-            h, w = self.input_size[1], self.input_size[0]
-            self._input_buf = np.empty((1, h, w, 3), dtype=np.uint8)
+        elif self.model_file.endswith(".onnx"):
+            self._require_input_block()
+            self.model_type = "onnx"
+            self._load_onnx(self.model_file)
+
+        elif self.model_file.endswith(".tflite"):
+            self._require_input_block()
+            self.model_type = "tflite"
+            self._load_tflite(self.model_file)
 
         elif (
             self.model_file.endswith(".pt")
-            or self.model_file.endswith(".onnx")
             or "openvino_model" in self.model_file
             or self.model_file.endswith(".mlpackage")
         ):
-            if self.model_file.endswith(".pt"):
-                self.logger.info(".pt model — using Ultralytics backend directly.")
-
             self.model_type = "yolo"
-            # Let Ultralytics auto-detect task from the model metadata
             self.model = YOLO(self.model_file, verbose=False)
-
-        elif self.model_file.endswith(".tflite"):
-            self.model_type = "tflite"
-            self._tflite_buf = None  # allocated lazily on first frame
-            self._load_tflite(self.model_file)
 
         else:
             raise ValueError(f"Unsupported model file type: {self.model_file}")
 
         self.logger.info(
-            "GenericYolo loaded: %s  type=%s  task=%s  nms=%s",
+            "GenericYolo loaded: %s  type=%s  task=%s  output=%s",
             self.model_file,
             self.model_type,
             self.task,
-            self.has_hardware_nms,
+            self.output["format"],
         )
+
+    def _require_input_block(self) -> None:
+        if self.input is None:
+            raise ValueError(
+                "model_config.input is required for RKNN, ONNX, and TFLite models. "
+                "Declare layout, dtype, letterbox, pad_value (if letterbox), normalize, and scale (if normalize)."
+            )
+
+    def _feature_width(self) -> int:
+        out = self.output
+        if out["format"] == "hardware_nms":
+            return 6
+        if self.task == "pose":
+            score_cols = 1 if out["score_mode"] == "objectness" else self.num_classes
+            return 4 + score_cols + out["num_keypoints"] * out["keypoint_dims"]
+        score_cols = 1 if out["score_mode"] == "objectness" else self.num_classes
+        return 4 + score_cols
+
+    def _load_onnx(self, model_file: str) -> None:
+        try:
+            import onnxruntime as ort
+        except ImportError as exc:
+            raise ImportError(
+                "onnxruntime is required for .onnx models. Install onnxruntime."
+            ) from exc
+
+        self.model = ort.InferenceSession(
+            model_file, providers=["CPUExecutionProvider"]
+        )
+        self._onnx_inp_name = self.model.get_inputs()[0].name
+        self._onnx_out_names = [o.name for o in self.model.get_outputs()]
 
     def _load_tflite(self, model_file: str):
         try:
@@ -127,7 +257,11 @@ class GenericYolo:
         self._tflite_out = self.model.get_output_details()
 
     def _letterbox_into(
-        self, img: np.ndarray, dst: np.ndarray, target_size: tuple
+        self,
+        img: np.ndarray,
+        dst: np.ndarray,
+        target_size: tuple,
+        pad_value: int = 114,
     ) -> None:
         h, w = img.shape[:2]
         target_w, target_h = target_size
@@ -136,27 +270,53 @@ class GenericYolo:
         new_h = int(h * scale)
         top = (target_h - new_h) // 2
         left = (target_w - new_w) // 2
-        dst[:] = 114
+        dst[:] = pad_value
         dst[top : top + new_h, left : left + new_w] = cv2.resize(img, (new_w, new_h))
 
-    def _preprocess_for_rknn(self, frame: np.ndarray) -> np.ndarray:
-        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        self._letterbox_into(img_rgb, self._input_buf[0], self.input_size)
-        return self._input_buf
-
-    def _preprocess_for_tflite(self, frame: np.ndarray) -> np.ndarray:
-        h, w = self.input_size[1], self.input_size[0]
-        if self._tflite_buf is None:
-            self._tflite_buf = np.empty((1, h, w, 3), dtype=np.uint8)
-
-        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        self._letterbox_into(img_rgb, self._tflite_buf[0], self.input_size)
-
-        dtype = self._tflite_inp["dtype"]
-        if dtype == np.uint8:
-            return self._tflite_buf
+    def _alloc_preprocess_buffer(self) -> np.ndarray:
+        inp = self.input
+        target_w, target_h = self.input_size
+        if inp["layout"] == "nhwc":
+            shape = (1, target_h, target_w, 3)
         else:
-            return self._tflite_buf.astype(np.float32) / 255.0
+            shape = (1, 3, target_h, target_w)
+        buf_dtype = np.uint8 if inp["dtype"] == "uint8" else np.float32
+        return np.empty(shape, dtype=buf_dtype)
+
+    def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
+        inp = self.input
+        target_w, target_h = self.input_size
+        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        if inp["letterbox"]:
+            if self._preprocess_buf is None:
+                self._preprocess_buf = self._alloc_preprocess_buffer()
+            pad_value = int(inp["pad_value"])
+            if inp["layout"] == "nhwc":
+                self._letterbox_into(
+                    img_rgb, self._preprocess_buf[0], self.input_size, pad_value
+                )
+            else:
+                nhwc = np.empty((target_h, target_w, 3), dtype=np.uint8)
+                self._letterbox_into(img_rgb, nhwc, self.input_size, pad_value)
+                self._preprocess_buf[0][:] = np.transpose(nhwc, (2, 0, 1))
+            tensor = self._preprocess_buf
+        else:
+            resized = cv2.resize(img_rgb, (target_w, target_h))
+            if inp["layout"] == "nchw":
+                tensor = np.transpose(resized, (2, 0, 1))[np.newaxis]
+            else:
+                tensor = resized[np.newaxis]
+
+        if inp["dtype"] == "float32":
+            out = tensor.astype(np.float32, copy=False)
+            if inp["normalize"]:
+                out = out / float(inp["scale"])
+            return out
+
+        if tensor.dtype != np.uint8:
+            return np.clip(tensor, 0, 255).astype(np.uint8)
+        return tensor
 
     def predict_preprocessed(self, preprocessed: np.ndarray, orig_shape) -> Results:
         if self.model_type != "rknn":
@@ -173,12 +333,12 @@ class GenericYolo:
 
             if self.model_type == "rknn":
                 results_list.append(
-                    self._run_rknn(self._preprocess_for_rknn(frame), target_shape)
+                    self._run_rknn(self._preprocess_frame(frame), target_shape)
                 )
-
+            elif self.model_type == "onnx":
+                results_list.append(self._run_onnx(frame, target_shape))
             elif self.model_type == "tflite":
                 results_list.append(self._run_tflite(frame, target_shape))
-
             else:
                 result = self.model(
                     frame.copy(),
@@ -192,67 +352,108 @@ class GenericYolo:
 
         return results_list if is_list else results_list[0]
 
+    def _dequantize_tensor(self, tensor: np.ndarray) -> np.ndarray:
+        q = self.output["quantization"]
+        if q == "none":
+            return tensor.astype(np.float32) if tensor.dtype != np.float32 else tensor
+        scale = float(self.output["quant_scale"])
+        return tensor.astype(np.float32) / scale
+
     def _run_rknn(self, preprocessed: np.ndarray, orig_shape) -> Results:
         raw_outputs = self.model.inference(inputs=[preprocessed])
         if raw_outputs is None:
             return Results([], orig_shape)
 
-        # Dequantize if needed — must happen before postprocess
-        tensor = raw_outputs[0]
-        if tensor.dtype == np.int8:
-            tensor = tensor.astype(np.float32) / 128.0
-        elif tensor.dtype == np.uint8:
-            tensor = tensor.astype(np.float32) / 255.0
-        raw_outputs[0] = tensor
+        tensor = self._dequantize_tensor(raw_outputs[0])
+        return self.postprocess([tensor], orig_shape)
 
-        return self.postprocess(raw_outputs, orig_shape)
+    def _run_onnx(self, frame: np.ndarray, orig_shape) -> Results:
+        inp = self._preprocess_frame(frame)
+        raw = self.model.run(self._onnx_out_names, {self._onnx_inp_name: inp})
+        raw[0] = self._dequantize_tensor(raw[0])
+        return self.postprocess(raw, orig_shape)
 
     def _run_tflite(self, frame: np.ndarray, orig_shape) -> Results:
-        inp = self._preprocess_for_tflite(frame)
+        inp = self._preprocess_frame(frame)
         self.model.set_tensor(self._tflite_inp["index"], inp)
         self.model.invoke()
         raw = [self.model.get_tensor(d["index"]) for d in self._tflite_out]
+        raw[0] = self._dequantize_tensor(raw[0])
         return self.postprocess(raw, orig_shape)
 
     def postprocess(self, raw_outputs, orig_shape) -> Results:
         tensor = raw_outputs[0]
+        tensor = self._prepare_output_tensor(tensor)
+        if tensor.size == 0:
+            return Results([], orig_shape)
 
-        # Remove batch dim if present
-        if tensor.ndim == 3:
+        if self.output["format"] == "hardware_nms":
+            return self._parse_hardware_nms(tensor, orig_shape)
+        if self.task == "detect":
+            return self._parse_raw_detect(tensor, orig_shape)
+        return self._parse_raw_pose(tensor, orig_shape)
+
+    def _prepare_output_tensor(self, tensor: np.ndarray) -> np.ndarray:
+        while isinstance(tensor, (list, tuple)) and len(tensor) > 0:
             tensor = tensor[0]
 
-        # Transpose detection: shape is (D, N) when rows << cols
-        # Use the expected feature width to decide, not a magic threshold.
-        if tensor.ndim == 2:
-            rows, cols = tensor.shape
-            expected_feat = self._expected_feature_width()
-            if rows == expected_feat and cols != expected_feat:
-                # Clearly transposed: feature dim is on axis-0
-                tensor = tensor.T
-            elif rows < cols and cols == expected_feat:
-                pass  # already (N, D)
-            elif rows < cols and rows < cols // 2:
-                # Heuristic fallback: very few rows relative to columns → transposed
-                tensor = tensor.T
+        if tensor.ndim == 3 and tensor.shape[0] == 1:
+            tensor = tensor[0]
 
-        if self.has_hardware_nms:
-            return self._parse_hardware_nms(tensor, orig_shape)
-        elif self.task == "detect":
-            return self._parse_raw_detect(tensor, orig_shape)
-        elif self.task == "pose":
-            return self._parse_raw_pose(tensor, orig_shape)
-        else:
+        if tensor.ndim != 2:
             raise ValueError(
-                f"Unsupported task: '{self.task}'. Use 'detect' or 'pose'."
+                f"Expected 2D output tensor after batch squeeze, got shape {tensor.shape}."
             )
 
-    def _expected_feature_width(self) -> int:
-        if self.task == "pose":
-            # 4 box + num_classes objectness + keypoints (num_kpts * 3)
-            # We don't know num_kpts at init, so return the minimum (detect width)
-            return 4 + self.num_classes
-        # detect: 4 box coords + num_classes scores  (or 5 for single-class objectness)
-        return 4 + self.num_classes
+        if self.output["format"] == "hardware_nms":
+            return tensor
+
+        feat_w = self._feature_width()
+        if self.output["layout"] == "features_first":
+            if tensor.shape[0] == feat_w:
+                tensor = tensor.T
+            elif tensor.shape[1] != feat_w:
+                raise ValueError(
+                    f"Tensor shape {tensor.shape} does not match configured feature width {feat_w}."
+                )
+        elif tensor.shape[1] != feat_w:
+            if tensor.shape[0] == feat_w:
+                raise ValueError(
+                    "output.layout is 'anchors_first' but feature dimension is on axis 0. "
+                    "Set output.layout to 'features_first'."
+                )
+            raise ValueError(
+                f"Tensor shape {tensor.shape} does not match configured feature width {feat_w}."
+            )
+        return tensor
+
+    @staticmethod
+    def _apply_score_activation(scores: np.ndarray, are_logits: bool) -> np.ndarray:
+        if scores.size == 0:
+            return scores
+        if not are_logits:
+            return scores
+        return 1.0 / (1.0 + np.exp(-np.clip(scores, -88.0, 88.0)))
+
+    def _boxes_from_encoding(self, tensor: np.ndarray) -> np.ndarray:
+        if self.output["box_format"] == "xyxy":
+            return tensor[:, :4].astype(np.float32)
+        cx, cy, w, h = tensor[:, 0], tensor[:, 1], tensor[:, 2], tensor[:, 3]
+        return np.column_stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2])
+
+    def _scores_from_tensor(self, tensor: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        out = self.output
+        if out["score_mode"] == "objectness":
+            raw = tensor[:, 4]
+            confs = self._apply_score_activation(raw, out["scores_are_logits"])
+            class_ids = np.zeros(len(confs), dtype=np.int32)
+            return confs, class_ids
+
+        class_scores = tensor[:, 4 : 4 + self.num_classes]
+        class_scores = self._apply_score_activation(class_scores, out["scores_are_logits"])
+        confs = np.max(class_scores, axis=1)
+        class_ids = np.argmax(class_scores, axis=1)
+        return confs, class_ids
 
     def _scale_coords(
         self, coords: np.ndarray, orig_shape, is_kpts=False
@@ -269,20 +470,48 @@ class GenericYolo:
             scaled[[0, 2]] = np.clip((scaled[[0, 2]] - pad_x) / scale, 0, orig_w)
             scaled[[1, 3]] = np.clip((scaled[[1, 3]] - pad_y) / scale, 0, orig_h)
         else:
-            # keypoints: only x/y columns, leave confidence (col 2) untouched
             scaled[:, 0] = (scaled[:, 0] - pad_x) / scale
             scaled[:, 1] = (scaled[:, 1] - pad_y) / scale
 
         return scaled
 
-    @staticmethod
-    def _maybe_sigmoid(scores):
-        # FIX: Return immediately if the array is empty
-        if scores.size == 0:
-            return scores
-        if scores.min() < -0.1 or scores.max() > 1.1:
-            return 1.0 / (1.0 + np.exp(-np.clip(scores, -88.0, 88.0)))
-        return scores
+    def _solve_pnp(self, keypoints: np.ndarray) -> tuple[np.ndarray | None, np.ndarray | None]:
+        if not self.pnp_config:
+            return None, None
+
+        object_points = np.asarray(self.pnp_config["object_points"], dtype=np.float64)
+        camera_matrix = np.asarray(self.pnp_config["camera_matrix"], dtype=np.float64)
+        dist_coeffs = np.asarray(
+            self.pnp_config.get("dist_coeffs", [0.0, 0.0, 0.0, 0.0, 0.0]),
+            dtype=np.float64,
+        )
+        min_kpt_conf = float(self.pnp_config.get("min_keypoint_conf", 0.5))
+
+        image_points = []
+        model_points = []
+        for i, pt in enumerate(keypoints):
+            if i >= len(object_points):
+                break
+            if pt[2] < min_kpt_conf:
+                continue
+            image_points.append([float(pt[0]), float(pt[1])])
+            model_points.append(object_points[i])
+
+        if len(image_points) < 4:
+            return None, None
+
+        image_points = np.asarray(image_points, dtype=np.float64)
+        model_points = np.asarray(model_points, dtype=np.float64)
+        ok, rvec, tvec = cv2.solvePnP(
+            model_points,
+            image_points,
+            camera_matrix,
+            dist_coeffs,
+            flags=cv2.SOLVEPNP_ITERATIVE,
+        )
+        if not ok:
+            return None, None
+        return rvec.reshape(3), tvec.reshape(3)
 
     def _apply_software_nms(
         self,
@@ -290,7 +519,7 @@ class GenericYolo:
         confs: np.ndarray,
         class_ids: np.ndarray,
         orig_shape,
-        kpts_raw: np.ndarray = None,
+        kpts_raw: np.ndarray | None = None,
     ) -> Results:
         mask = confs >= self.min_conf
         boxes_xyxy = boxes_xyxy[mask]
@@ -302,25 +531,56 @@ class GenericYolo:
         if len(boxes_xyxy) == 0:
             return Results([], orig_shape)
 
-        # cv2.dnn.NMSBoxes expects [x, y, w, h]
+        if not self.output["apply_software_nms"]:
+            return self._pack_detections(
+                boxes_xyxy, confs, class_ids, orig_shape, kpts_raw, indices=None
+            )
+
+        nms_iou = float(self.output["nms_iou"])
         nms_input = [
             [float(b[0]), float(b[1]), float(b[2] - b[0]), float(b[3] - b[1])]
             for b in boxes_xyxy
         ]
-        indices = cv2.dnn.NMSBoxes(nms_input, confs.tolist(), self.min_conf, 0.45)
+        indices = cv2.dnn.NMSBoxes(nms_input, confs.tolist(), self.min_conf, nms_iou)
         indices = indices.flatten() if len(indices) > 0 else []
+        return self._pack_detections(
+            boxes_xyxy, confs, class_ids, orig_shape, kpts_raw, indices
+        )
+
+    def _pack_detections(
+        self,
+        boxes_xyxy: np.ndarray,
+        confs: np.ndarray,
+        class_ids: np.ndarray,
+        orig_shape,
+        kpts_raw: np.ndarray | None,
+        indices,
+    ) -> Results:
+        if indices is None:
+            indices = range(len(boxes_xyxy))
 
         final_boxes = []
         final_kpts = []
+        num_kpts = self.output.get("num_keypoints", 0) if kpts_raw is not None else 0
+        kpt_dims = self.output.get("keypoint_dims", 3) if kpts_raw is not None else 3
 
         for i in indices:
             xyxy = self._scale_coords(boxes_xyxy[i], orig_shape, is_kpts=False)
-            final_boxes.append(Box(xyxy.tolist(), float(confs[i]), int(class_ids[i])))
+            translation = None
+            kpt_scaled = None
 
-            if kpts_raw is not None:
-                # reshape to (num_kpts, 3) → scale x/y → keep conf column
-                kpt_set = kpts_raw[i].reshape(-1, 3)
+            if kpts_raw is not None and num_kpts > 0:
+                kpt_set = kpts_raw[i].reshape(num_kpts, kpt_dims)
                 kpt_scaled = self._scale_coords(kpt_set, orig_shape, is_kpts=True)
+                if self.pnp_config:
+                    _rvec, tvec = self._solve_pnp(kpt_scaled)
+                    if tvec is not None:
+                        translation = tvec.tolist()
+
+            final_boxes.append(
+                Box(xyxy.tolist(), float(confs[i]), int(class_ids[i]), translation)
+            )
+            if kpt_scaled is not None:
                 final_kpts.append(kpt_scaled)
 
         return Results(
@@ -329,97 +589,49 @@ class GenericYolo:
             keypoints=final_kpts if kpts_raw is not None else None,
         )
 
-    def _parse_hardware_nms(self, tensor, orig_shape):
-        # Safe list/tuple unboxing
-        while isinstance(tensor, (list, tuple)) and len(tensor) > 0:
-            tensor = tensor[0]
-            
-        # Safely peel off ONLY the first dimension if it represents a single batch axis
-        if hasattr(tensor, 'ndim') and tensor.ndim == 3 and tensor.shape[0] == 1:
-            tensor = tensor[0]
-
-        # Handle empty outputs safely
-        if tensor is None or (hasattr(tensor, 'size') and tensor.size == 0):
-            return Results(orig_shape=orig_shape, boxes=[])
-
-        # If it's a 2D tensor but has too few columns for a hardware NMS layout, early return
-        if hasattr(tensor, 'shape') and len(tensor.shape) > 1 and tensor.shape[1] < 6:
-            return Results(orig_shape=orig_shape, boxes=[])
+    def _parse_hardware_nms(self, tensor: np.ndarray, orig_shape) -> Results:
+        if tensor.shape[1] < 6:
+            return Results([], orig_shape)
 
         confs = tensor[:, 4]
-        # ... rest of your original method code ...
-        mask = confs >= self.min_conf
-        valid = tensor[mask]
+        valid = tensor[confs >= self.min_conf]
 
         boxes = []
         for det in valid:
-            xyxy = self._scale_coords(det[:4], orig_shape)
-            boxes.append(
-                Box(
-                    xyxy.tolist(), float(det[4]), int(det[5]) if det.shape[0] > 5 else 0
-                )
-            )
+            xyxy = self._scale_coords(det[:4], orig_shape, is_kpts=False)
+            cls_id = int(det[5]) if det.shape[0] > 5 else 0
+            boxes.append(Box(xyxy.tolist(), float(det[4]), cls_id))
 
-        return Results(orig_shape=orig_shape, boxes=[])
-    
+        return Results(boxes, orig_shape)
+
     def _parse_raw_detect(self, tensor: np.ndarray, orig_shape) -> Results:
-        cx, cy, w, h = tensor[:, 0], tensor[:, 1], tensor[:, 2], tensor[:, 3]
-        boxes_xyxy = np.column_stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2])
-
-        num_cols = tensor.shape[1]
-        score_cols = num_cols - 4  # everything after the 4 box coords
-
-        if score_cols == 1 or (self.num_classes == 1 and score_cols == 1):
-            # Single objectness score — apply sigmoid if raw logits
-            raw_confs = tensor[:, 4]
-            confs = self._maybe_sigmoid(raw_confs)
-            class_ids = np.zeros(len(confs), dtype=np.int32)
-        else:
-            # Multi-class scores
-            class_scores = tensor[:, 4 : 4 + self.num_classes]
-            class_scores = self._maybe_sigmoid(class_scores)
-            confs = np.max(class_scores, axis=1)
-            class_ids = np.argmax(class_scores, axis=1)
-
+        boxes_xyxy = self._boxes_from_encoding(tensor)
+        confs, class_ids = self._scores_from_tensor(tensor)
         return self._apply_software_nms(boxes_xyxy, confs, class_ids, orig_shape)
 
-    def _parse_raw_pose(self, tensor, orig_shape):
-        # Loop to unpack nested lists or tuples until we hit a raw array
-        while isinstance(tensor, (list, tuple)) and len(tensor) > 0:
-            tensor = tensor[0]
-            
-        # Squeeze out all single-dimensional outer batch axes
-        if hasattr(tensor, 'ndim') and tensor.ndim > 2:
-            tensor = np.squeeze(tensor)
-            if tensor.ndim == 1:
-                tensor = np.expand_dims(tensor, axis=0)
+    def _parse_raw_pose(self, tensor: np.ndarray, orig_shape) -> Results:
+        boxes_xyxy = self._boxes_from_encoding(tensor)
+        confs, class_ids = self._scores_from_tensor(tensor)
 
-        cx, cy, w, h = tensor[:, 0], tensor[:, 1], tensor[:, 2], tensor[:, 3]
-        # ... rest of your code ...
-        boxes_xyxy = np.column_stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2])
-
-        class_scores = tensor[:, 4 : 4 + self.num_classes]
-        class_scores = self._maybe_sigmoid(class_scores)
-        confs = np.max(class_scores, axis=1)
-        class_ids = np.argmax(class_scores, axis=1)
-
-        kpts_start = 4 + self.num_classes
-        kpts_raw = tensor[:, kpts_start:]  # (N, num_kpts*3)
-
-        if kpts_raw.shape[1] == 0:
-            self.logger.warning(
-                "task='pose' but no keypoint columns found after class scores. "
-                "Check num_classes=%d vs actual model output width %d.",
-                self.num_classes,
-                tensor.shape[1],
+        score_cols = 1 if self.output["score_mode"] == "objectness" else self.num_classes
+        kpts_start = 4 + score_cols
+        kpts_raw = tensor[:, kpts_start:]
+        expected = self.output["num_keypoints"] * self.output["keypoint_dims"]
+        if kpts_raw.shape[1] != expected:
+            raise ValueError(
+                f"Pose keypoint columns {kpts_raw.shape[1]} != expected {expected} "
+                f"(num_keypoints={self.output['num_keypoints']}, "
+                f"keypoint_dims={self.output['keypoint_dims']})."
             )
-            kpts_raw = None
+
+        if self.output["keypoint_scores_are_logits"]:
+            kd = self.output["keypoint_dims"]
+            for k in range(2, kpts_raw.shape[1], kd):
+                kpts_raw[:, k] = self._apply_score_activation(kpts_raw[:, k], True)
 
         return self._apply_software_nms(
             boxes_xyxy, confs, class_ids, orig_shape, kpts_raw=kpts_raw
         )
-
-    # ── Ultralytics converter ─────────────────────────────────────────────────
 
     def _convert_ultralytics_to_results(self, ultralytics_result) -> Results:
         boxes = []
@@ -436,7 +648,6 @@ class GenericYolo:
             and ultralytics_result.keypoints is not None
         ):
             kpt_data = ultralytics_result.keypoints.data
-            # .data may be a torch.Tensor — convert safely
             if hasattr(kpt_data, "cpu"):
                 kpt_data = kpt_data.cpu().numpy()
             for kpt_set in kpt_data:

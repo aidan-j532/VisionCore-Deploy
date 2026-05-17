@@ -10,25 +10,84 @@ class VisionCoreConfig:
     def __init__(self, file_path: str = None):
         self.logger = logging.getLogger(__name__)
 
+        # Defaults used when no Config/config.json is loaded. JSON on disk cannot
+        # contain comments; document fields here for GenericYolo v2 and pipelines.
         self.default_config = {
+            # ── Model (GenericYolo v2) ───────────────────────────────────────
             "vision_model": {
+                # Weights path. .pt → Ultralytics; .onnx/.rknn/.tflite → config below.
                 "file_path": "YoloModels/pytorch/default.pt",
+                # Original .pt kept for auto_opt conversion at boot.
                 "source_pt": "YoloModels/pytorch/default.pt",
+                # Letterbox target [width, height] in pixels.
                 "input_size": [640, 640],
+                # Minimum detection confidence (0–1).
                 "min_conf": 0.5,
+                # Pixels ignored at image edges in ObjectDetectionCamera.
                 "margin": 10,
+                # Legacy flag; use output.quantization for RKNN/TFLite/ONNX dequant.
                 "quantized": False,
-                "task": "pose",  # Options: "detect", "pose", "segment"
-                "has_hardware_nms": False,  # True if End2End model, False if raw anchors
+                # "detect" (boxes) or "pose" (boxes + keypoints).
+                "task": "detect",
+                # Class count in the exported head (80 for COCO, 1 for game piece).
                 "num_classes": 1,
+                # Tensor layout + postprocess (required for embedded runtimes).
+                "output": {
+                    # "raw" = decode + optional software NMS; "hardware_nms" = baked NMS.
+                    "format": "raw",
+                    # "anchors_first" (N×D) or "features_first" (D×N, transposed export).
+                    "layout": "anchors_first",
+                    # Box encoding in raw tensor: "cxcywh" or "xyxy".
+                    "box_format": "cxcywh",
+                    # "multi_class" (per-class scores) or "objectness" (1 score, num_classes=1).
+                    "score_mode": "objectness",
+                    # If true, apply sigmoid to score columns before threshold/NMS.
+                    "scores_are_logits": False,
+                    # Software NMS when format is "raw" (ignored for hardware_nms).
+                    "apply_software_nms": True,
+                    "nms_iou": 0.45,
+                    # Dequantization: "none", "int8", or "uint8" (+ quant_scale if not none).
+                    "quantization": "none",
+                    # Pose-only (required when task is "pose"):
+                    # "num_keypoints": 17,
+                    # "keypoint_dims": 3,
+                    # "keypoint_scores_are_logits": False,
+                },
+                # Preprocess for RKNN / ONNX / TFLite (not used for .pt Ultralytics path).
+                "input": {
+                    # "nhwc" (RKNN/TFLite) or "nchw" (typical ONNX export).
+                    "layout": "nhwc",
+                    # "uint8" or "float32".
+                    "dtype": "uint8",
+                    # Letterbox to input_size with pad_value (RKNN-style).
+                    "letterbox": True,
+                    "pad_value": 114,
+                    # Divide by scale when true (common for float32 ONNX).
+                    "normalize": False,
+                    # "scale": 255.0,  # required when normalize is true
+                },
+                # Optional PnP for pose (translation stored on Box; rotation not stored):
+                # "pnp": {
+                #     "object_points": [[0, 0, 0], ...],
+                #     "camera_matrix": [[fx, 0, cx], [0, fy, cy], [0, 0, 1]],
+                #     "dist_coeffs": [0, 0, 0, 0, 0],
+                #     "min_keypoint_conf": 0.5,
+                # },
             },
+            # ── Global ───────────────────────────────────────────────────────
+            # Robot/output distance unit: meter, inch, foot, centimeter, etc.
             "unit": "meter",
+            # Draw boxes/FPS on debug stream.
             "debug_mode": True,
+            # DBSCAN clustering for tracker fusion.
             "dbscan": {"elipson": 0.3, "min_samples": 3},
+            # Merge radius for object tracker (in unit above).
             "distance_threshold": 0.5,
+            # Seconds before a detection is considered stale.
             "stale_threshold": 1.0,
             "record_mode": False,
             "record_dir": "VideoRecordings",
+            # Convert .pt to best local format (rknn, onnx, …) at boot.
             "auto_opt": True,
             "log_level": "INFO",
             "log_file": "Outputs/log.txt",
@@ -36,12 +95,15 @@ class VisionCoreConfig:
             "network_tables_ip": "10.0.0.2",
             "metrics": False,
             "app_mode": True,
+            # ── Cameras ────────────────────────────────────────────────────
             "camera_configs": {
                 "default_cam": {
                     "name": "default_cam",
+                    # Device index, path, or image file.
                     "source": 0,
                     "pipeline": "object_detection",
                     "fps_cap": 30,
+                    # Mount pose on robot (radians / meters).
                     "yaw": 0,
                     "pitch": 0,
                     "height": 1.0,
@@ -49,6 +111,7 @@ class VisionCoreConfig:
                     "y": 0,
                     "grayscale": False,
                     "subsystem": "field",
+                    # Distance calibration (measure on real field + game piece).
                     "calibration": {
                         "distance": 0.0,
                         "game_piece_size": 0.0,
@@ -57,6 +120,7 @@ class VisionCoreConfig:
                     },
                 }
             },
+            # ── Plugins ────────────────────────────────────────────────────
             "plugins": {
                 "trackers": ["object_tracker", "fuel", "path_planner"],
                 "utilities": ["video_recorder", "health_reporter"],

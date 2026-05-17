@@ -1,12 +1,28 @@
 {
     "vision_model": {
         "file_path": "C:\\Users\\RoboticsTeam\\Desktop\\VisionCore\\VisionCore-Deploy\\YoloModels\\pytorch\\nano\\dummy_openvino_model",
-        "input_size": [
-            640,
-            640
-        ],
+        "task": "detect",
+        "num_classes": 80,
+        "input_size": [640, 640],
         "min_conf": 0.5,
-        "margin": 10
+        "margin": 10,
+        "output": {
+            "format": "raw",
+            "layout": "anchors_first",
+            "box_format": "cxcywh",
+            "score_mode": "multi_class",
+            "scores_are_logits": false,
+            "apply_software_nms": true,
+            "nms_iou": 0.45,
+            "quantization": "none"
+        },
+        "input": {
+            "layout": "nhwc",
+            "dtype": "uint8",
+            "letterbox": true,
+            "pad_value": 114,
+            "normalize": false
+        }
     },
     "unit": "meter",
     "debug_mode": true,
