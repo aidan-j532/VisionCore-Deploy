@@ -5,15 +5,16 @@ from functools import lru_cache
 
 SUPPORTED_FORMATS = {"tflite", "openvino", "coreml", "onnx", "rknn"}
 
-@lru_cache()
-def run(cmd):
+@lru_cache(maxsize=16)
+def run(cmd: str) -> str:
+    """Run a shell command string. Must be a str so lru_cache can hash the argument."""
     try:
         return subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            shell=isinstance(cmd, str)
+            shell=True,
         ).stdout.lower()
     except Exception:
         return ""
@@ -28,10 +29,11 @@ def has_nvidia():
 def has_amd_gpu():
     if os.name == "nt":
         return "amd" in run("wmic path win32_videocontroller get name")
-    return "amd" in run(["lspci"]) or "radeon" in run(["lspci"])
+    lspci = run("lspci")
+    return "amd" in lspci or "radeon" in lspci
 
 def has_intel_gpu():
-    return "intel" in platform.processor().lower() or "intel" in run(["lspci"])
+    return "intel" in platform.processor().lower() or "intel" in run("lspci")
 
 has_intel = has_intel_gpu
 
@@ -42,15 +44,17 @@ def has_apple_silicon():
     return platform.system() == "Darwin" and "arm" in platform.machine().lower()
 
 @lru_cache()
-def lsusb():
-    return run(["lsusb"]) if command_exists("lsusb") else run("wmic path win32_pnpentity get name")
+def _lsusb_output() -> str:
+    if command_exists("lsusb"):
+        return run("lsusb")
+    return run("wmic path win32_pnpentity get name")
 
 def has_intel_vpu():
-    usb = lsusb()
+    usb = _lsusb_output()
     return "movidius" in usb or "03e7:2485" in usb
 
 def has_edge_tpu():
-    usb = lsusb()
+    usb = _lsusb_output()
     return "18d1:9302" in usb or "1ac1:089a" in usb
 
 def has_rockchip_npu():
