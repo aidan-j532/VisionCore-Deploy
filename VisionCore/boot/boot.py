@@ -40,6 +40,20 @@ FORMAT_MATCHERS = {
     "openvino": lambda p: p.is_dir() and p.name.endswith("_openvino_model"),
 }
 
+def reset_workspace():
+    targets = [
+        _PROJECT_ROOT / "YoloModels",
+        _PROJECT_ROOT / "Outputs",
+        _PROJECT_ROOT / "Config",
+    ]
+
+    for target in targets:
+        if target.exists():
+            logger.warning("Removing existing directory: %s", target)
+            shutil.rmtree(target, ignore_errors=True)
+
+    logger.info("Workspace reset complete.")
+
 def search_for_config():
     config_dir = _PROJECT_ROOT / "Config"
 
@@ -188,7 +202,13 @@ def setup_files():
         if bundled.exists():
             shutil.copy(bundled, nano_pt)
 
-def on_boot(install_service: bool = False):
+def on_boot(
+    install_service: bool = False,
+    first_boot: bool = False
+):
+    if first_boot:
+        logger.warning("First boot mode enabled. Resetting workspace...")
+        reset_workspace()
     setup_files()
 
     config_path = search_for_config()
@@ -235,10 +255,10 @@ def on_boot(install_service: bool = False):
                     pt_full = _PROJECT_ROOT / pt_path
 
                 if not pt_full.exists():
-                    logger.warning("Model missing in workspace, copying bundled default.pt")
+                    logger.warning("Model missing in workspace, copying bundled _default.pt")
 
-                    bundled = _ASSETS_DIR / "default.pt"
-                    target = _PROJECT_ROOT / "YoloModels/pytorch/default.pt"
+                    bundled = _ASSETS_DIR / "_default.pt"
+                    target = _PROJECT_ROOT / "YoloModels/pytorch/_default.pt"
 
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy(bundled, target)
@@ -288,8 +308,14 @@ def main():
         action="store_true",
         help="Install and start the watchdog service so VisionCore runs on boot"
     )
+
+    parser.add_argument(
+        "-first", "--first-boot",
+        action="store_true",
+        help="Delete Config, Outputs, and YoloModels before booting"
+    )
     args = parser.parse_args()
-    on_boot(install_service=args.service)
+    on_boot(install_service=args.service, first_boot=args.first_boot)
 
 if __name__ == "__main__":
     main()
