@@ -9,8 +9,8 @@ _PROJECT_ROOT = Path(
     os.environ.get("VISIONCORE_ROOT")
     or Path.home() / "VisionCore"
 ).resolve()
-PACKAGE_ROOT = Path(__file__).resolve().parent
-ASSETS_DIR = PACKAGE_ROOT / "assets"
+_PACKAGE_ROOT = Path(__file__).resolve().parent
+ASSETS_DIR = _PACKAGE_ROOT.parent / "assets"
 
 import subprocess
 from VisionCore.config.AutoOpt import recommend_format
@@ -175,9 +175,9 @@ def setup_files():
     config_dir = _PROJECT_ROOT / "Config"
     outputs_dir = _PROJECT_ROOT / "Outputs"
 
-    yolo_dir.mkdir(exist_ok=True)
-    config_dir.mkdir(exist_ok=True)
-    outputs_dir.mkdir(exist_ok=True)
+    yolo_dir.mkdir(parents=True, exist_ok=True)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
 
     for fmt in ["pytorch", "onnx", "tflite", "rknn", "openvino", "coreml"]:
         (yolo_dir / fmt).mkdir(parents=True, exist_ok=True)
