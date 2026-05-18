@@ -7,18 +7,14 @@ import subprocess
 from VisionCore.config.VisionCoreConfig import VisionCoreCameraConfig
 import platform
 
-from pathlib import Path
-
-ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
 
 class Camera:
-    def __init__(
-        self,
-        camera_config: VisionCoreCameraConfig,
-        fps_cap: int,
-        input_size: tuple,
-        grayscale: bool,
-    ):
+
+    # Resolution used for the synthetic "no camera" placeholder frame.
+    _PLACEHOLDER_W = 640
+    _PLACEHOLDER_H = 480
+
+    def __init__(self, camera_config: VisionCoreCameraConfig, fps_cap: int, input_size: tuple, grayscale: bool):
         self.logger = logging.getLogger(__name__)
 
         self.fps_cap = fps_cap
@@ -40,30 +36,46 @@ class Camera:
             self.image = cv2.imread(self.source)
             if self.image is None:
                 self.logger.warning(
-                    "Camera source image not found: %s — using placeholder.",
+                    "Could not read image '%s' — using synthetic placeholder frame.",
                     self.source,
                 )
-                # Load image
-            self.image = cv2.imread(str(ASSETS_DIR / "camera_not_found.png"))
+                self.image = self._make_placeholder_frame()
         else:
             self.is_image = False
             try:
                 self._open_camera()
-            except Exception as exc:
+            except ValueError as exc:
                 self.logger.warning(
-                    "Camera source '%s' could not be opened (%s) — "
-                    "using 'Camera Not Found' placeholder.",
+                    "Camera source '%s' could not be opened (%s) — using synthetic placeholder frame.",
                     self.source,
                     exc,
                 )
+                # Treat the object as an "image" source backed by the placeholder so
+                # the rest of the pipeline can keep running without modification.
                 self.is_image = True
-                self.image = cv2.imread(str(ASSETS_DIR / "camera_not_found.png"))
-            if not self.is_image:
-                threading.Thread(
-                    target=self._reader,
-                    daemon=True,
-                    name=f"CamReader-{self.source}",
-                ).start()
+                self.image = self._make_placeholder_frame()
+                return
+
+            threading.Thread(
+                target=self._reader,
+                daemon=True,
+                name=f"CamReader-{self.source}",
+            ).start()
+
+    def _make_placeholder_frame(
+        self, width: int = _PLACEHOLDER_W,
+        height: int = _PLACEHOLDER_H,
+    ) -> np.ndarray:
+        frame = np.full((height, width, 3), 40, dtype=np.uint8)
+        text = "Camera Not Found"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 1.0
+        thickness = 2
+        (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
+        cx = (width - tw) // 2
+        cy = (height + th) // 2
+        cv2.putText(frame, text, (cx, cy), font, scale, (180, 180, 180), thickness, cv2.LINE_AA)
+        return frame
 
     def _open_camera(self):
         is_windows = platform.system() == "Windows"
@@ -80,20 +92,13 @@ class Camera:
         for _ in range(10):
             self.cap.grab()
 
-        # v4l2-ctl is Linux only
+        # v4l2-ctl is Linux-only
         if not is_windows:
-            device = (
-                self.source
-                if isinstance(self.source, str)
-                else f"/dev/video{self.source}"
-            )
+            device = self.source if isinstance(self.source, str) else f"/dev/video{self.source}"
             subprocess.run(
                 [
-                    "v4l2-ctl",
-                    "-d",
-                    device,
-                    f"--set-fmt-video=width={self.input_size[0]},"
-                    f"height={self.input_size[1]},pixelformat=MJPG",
+                    "v4l2-ctl", "-d", device,
+                    f"--set-fmt-video=width={self.input_size[0]},height={self.input_size[1]},pixelformat=MJPG",
                 ],
                 capture_output=True,
             )
@@ -114,7 +119,7 @@ class Camera:
         while not self.stopped:
             ret, frame = self.cap.read()
             if not ret:
-                self.logger.warning("Frame read failed on %s, retrying…", self.source)
+                self.logger.warning(f"Frame read failed on {self.source}, retrying…")
                 time.sleep(0.05)
                 continue
 
@@ -129,7 +134,6 @@ class Camera:
 
     def get_frame_age(self) -> float:
         if self.is_image:
-            # Placeholder / still images are always "fresh"
             return 0.0
         with self.frame_lock:
             ts = self.frame_timestamp
@@ -137,7 +141,7 @@ class Camera:
 
     def get_frame(self) -> np.ndarray | None:
         if self.is_image:
-            return self.image.copy()
+            return self.image.copy() if self.image is not None else None
         with self.frame_lock:
             return self.frame.copy() if self.frame is not None else None
 
