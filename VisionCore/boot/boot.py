@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import ultralytics
 from pathlib import Path
+from VisionCore.vision.ModelInspector import fill_missing_config
 
 _BOOT_DIR = Path(__file__).resolve().parent
 
@@ -277,6 +278,12 @@ def on_boot(install_service: bool = False, first_boot: bool = False):
 
     if not model_full_path.exists():
         raise FileNotFoundError(f"Model file not found: {model_full_path}")
+    
+    vision_cfg = config.get("vision_model", {})
+    filled = fill_missing_config(vision_cfg)
+    config.set("vision_model", filled)
+    config.save()   # persists to config.json
+    logger.info("Model config auto-filled and saved.")
 
     logger.info(
         "Boot sequence complete. Final model path: %s",

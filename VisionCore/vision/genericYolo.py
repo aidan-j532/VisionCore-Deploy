@@ -1,8 +1,8 @@
 import logging
-
 import cv2
 import numpy as np
 from ultralytics import YOLO
+from VisionCore.config.ModelInspector import fill_missing_config
 
 try:
     from rknnlite.api import RKNNLite
@@ -13,10 +13,6 @@ except ImportError:
 
 
 def normalize_model_config(model_config: dict) -> dict:
-    """
-    Validate model_config. Tensor layout and postprocess behavior must be declared
-    in config — runtime only checks shapes against configured feature widths.
-    """
     cfg = dict(model_config)
     for key in ("file_path", "task", "num_classes", "input_size", "output"):
         if key not in cfg:
@@ -112,7 +108,6 @@ class Box:
         self.xyxy = xyxy
         self.conf = conf
         self.cls_id = cls_id
-        # PnP translation (x, y, z); rotation is solved but not stored on Box.
         self.translation = translation
 
 
@@ -144,6 +139,7 @@ class Results:
 class GenericYolo:
     def __init__(self, model_config: dict, core_mask=None):
         self.logger = logging.getLogger(__name__)
+        model_config = fill_missing_config(model_config)
         cfg = normalize_model_config(model_config)
 
         self.model_file = cfg["file_path"]
@@ -233,55 +229,6 @@ class GenericYolo:
         )
         self._onnx_inp_name = self.model.get_inputs()[0].name
         self._onnx_out_names = [o.name for o in self.model.get_outputs()]
-
-        inp_meta = self.model.get_inputs()[0]
-
-        ORT_TO_DTYPE = {
-            "tensor(float)":   "float32",
-            "tensor(float32)": "float32",
-            "tensor(double)":  "float32",
-            "tensor(uint8)":   "uint8",
-            "tensor(int8)":    "uint8",
-        }
-        ort_type = inp_meta.type
-        expected_dtype = ORT_TO_DTYPE.get(ort_type)
-
-        if expected_dtype and self.input.get("dtype") != expected_dtype:
-            self.logger.warning(
-                "ONNX model input type '%s' does not match config.input.dtype '%s'. "
-                "Auto-correcting to '%s'. Update your config to silence this warning.",
-                ort_type, self.input.get("dtype"), expected_dtype,
-            )
-            self.input["dtype"] = expected_dtype
-
-            if expected_dtype == "float32":
-                if not self.input.get("normalize"):
-                    self.input["normalize"] = True
-                    self.input.setdefault("scale", 255.0)
-                    self.logger.warning(
-                        "Enabling normalize=True with scale=255.0 to match float32 model. "
-                        "Set these explicitly in your config to silence this warning."
-                    )
-            else:
-                self.input["normalize"] = False
-
-        shape = inp_meta.shape  # [1, 3, 640, 640] or [1, 640, 640, 3]
-        detected_layout = None
-        if len(shape) == 4:
-            c1 = shape[1]
-            c3 = shape[3]
-            if isinstance(c1, int) and c1 > 0 and c1 <= 4:
-                detected_layout = "nchw"
-            elif isinstance(c3, int) and c3 > 0 and c3 <= 4:
-                detected_layout = "nhwc"
-
-        if detected_layout and self.input.get("layout") != detected_layout:
-            self.logger.warning(
-                "ONNX model input shape %s implies layout '%s' but config.input.layout "
-                "is '%s'. Auto-correcting. Update your config to silence this warning.",
-                shape, detected_layout, self.input.get("layout"),
-            )
-            self.input["layout"] = detected_layout
 
     def _load_tflite(self, model_file: str):
         try:
