@@ -233,6 +233,40 @@ class GenericYolo:
         )
         self._onnx_inp_name = self.model.get_inputs()[0].name
         self._onnx_out_names = [o.name for o in self.model.get_outputs()]
+    
+        ort_type: str = self.model.get_inputs()[0].type  # e.g. "tensor(float)"
+
+        ORT_TO_DTYPE = {
+            "tensor(float)":  "float32",
+            "tensor(float32)": "float32",
+            "tensor(double)": "float32",   # treat as float32 for our purposes
+            "tensor(uint8)":  "uint8",
+            "tensor(int8)":   "uint8",     # treat signed byte the same way
+        }
+        expected_dtype = ORT_TO_DTYPE.get(ort_type)
+
+        if expected_dtype and self.input.get("dtype") != expected_dtype:
+            self.logger.warning(
+                "ONNX model input type is '%s' but config.input.dtype is '%s'. "
+                "Auto-correcting to '%s'.",
+                ort_type,
+                self.input.get("dtype"),
+                expected_dtype,
+            )
+            self.input["dtype"] = expected_dtype
+
+            if expected_dtype == "float32":
+                # Most Ultralytics ONNX exports expect pixels in [0, 1].
+                if not self.input.get("normalize"):
+                    self.input["normalize"] = True
+                    self.input.setdefault("scale", 255.0)
+                    self.logger.warning(
+                        "Enabling normalize=True with scale=255.0 to match float32 model. "
+                        "Set these explicitly in your config to silence this warning."
+                    )
+            else:
+                # uint8 model — disable normalization so we don't accidentally divide.
+                self.input["normalize"] = False
 
     def _load_tflite(self, model_file: str):
         try:
