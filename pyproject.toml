@@ -57,7 +57,7 @@ metrics = [
 
 [project.scripts]
 visioncore-run  = "VisionCore.core.game_loop:main"
-visioncore-boot = "VisionCore.boot.boot:on_boot"
+visioncore-boot = "VisionCore.boot.boot:main"
 
 [project.urls]
 Homepage = "https://github.com/aidan-j532/VisionCore-Deploy"

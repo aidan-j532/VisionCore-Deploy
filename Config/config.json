@@ -1,14 +1,33 @@
 {
     "vision_model": {
-        "file_path": "C:\\Users\\RoboticsTeam\\Desktop\\VisionCore\\VisionCore-Deploy\\YoloModels\\pytorch\\default_openvino_model",
-        "source_pt": "YoloModels/pytorch/default.pt",
+        "file_path": "C:\\Users\\RoboticsTeam\\Desktop\\VisionCore\\VisionCore-Deploy\\YoloModels\\pytorch\\_default_openvino_model",
+        "task": "detect",
+        "num_classes": 1,
         "input_size": [
             640,
             640
         ],
         "min_conf": 0.5,
-        "margin": 10,
-        "quantized": false
+        "output": {
+            "format": "raw",
+            "layout": "features_first",
+            "box_format": "cxcywh",
+            "score_mode": "multi_class",
+            "scores_are_logits": false,
+            "apply_software_nms": true,
+            "nms_iou": 0.45,
+            "quantization": "none"
+        },
+        "input": {
+            "layout": "nchw",
+            "dtype": "float32",
+            "letterbox": true,
+            "pad_value": 114,
+            "normalize": true,
+            "scale": 255.0
+        },
+        "source_pt": "YoloModels/pytorch/_default.pt",
+        "margin": 10
     },
     "unit": "meter",
     "debug_mode": true,

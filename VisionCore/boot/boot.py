@@ -193,23 +193,26 @@ def setup_files():
 
 def on_boot(install_service: bool = False, first_boot: bool = False):
     if first_boot:
-        logger.warning("First boot mode enabled. Resetting workspace...")
+        logger.info("First boot mode enabled. Resetting workspace...")
         reset_workspace()
     setup_files()
 
     config_path = search_for_config()
 
+    config = None
+
     if not config_path:
         logger.info("No config found. Creating default config...")
         config_path = _PROJECT_ROOT / "Config" / "config.json"
-        VisionCoreConfig(str(config_path)).save()
+        config = VisionCoreConfig(str(config_path), create=True).save()
     else:
         logger.info(f"Using existing config: {config_path}")
 
     if not validate_system():
         raise RuntimeError("System validation failed. Aborting boot.")
 
-    config = VisionCoreConfig(str(config_path))
+    if config is None:
+        config = VisionCoreConfig(str(config_path))
 
     if config.get("auto_opt"):
         best_format = recommend_format()
@@ -282,14 +285,13 @@ def on_boot(install_service: bool = False, first_boot: bool = False):
     vision_cfg = config.get("vision_model", {})
     filled = fill_missing_config(vision_cfg)
     config.set("vision_model", filled)
-    config.save()   # persists to config.json
     logger.info("Model config auto-filled and saved.")
 
     logger.info(
         "Boot sequence complete. Final model path: %s",
         config.get("vision_model", {}).get("file_path"),
     )
-    config.save()
+    config.save(quiet=True)
 
     if install_service:
         install_script = str(_BOOT_DIR / "install.py")
@@ -316,7 +318,7 @@ def main():
     )
 
     parser.add_argument(
-        "-first",
+        "-f",
         "--first-boot",
         action="store_true",
         help="Delete Config, Outputs, and YoloModels before booting",

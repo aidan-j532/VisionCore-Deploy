@@ -7,7 +7,7 @@ _REPO_ROOT = Path.cwd()
 
 
 class VisionCoreConfig:
-    def __init__(self, file_path: str = None):
+    def __init__(self, file_path: str = None, create: bool=True):
         self.logger = logging.getLogger(__name__)
 
         self.default_config = {
@@ -103,6 +103,9 @@ class VisionCoreConfig:
         self.config = json.loads(json.dumps(self.default_config))
         self.file_path = file_path
 
+        if create and file_path is not None:
+            self.save()
+
         if file_path:
             self.load_from_file(file_path)
 
@@ -154,6 +157,7 @@ class VisionCoreConfig:
                 missing = True
 
         if missing:
+            self.logger.info("Required trackers missing. Saving updated config.")
             self.save()
 
     def get_default_config(self) -> dict:
@@ -194,10 +198,11 @@ class VisionCoreConfig:
                     "Failed to apply logging configuration after loading file"
                 )
 
-    def save(self):
+    def save(self, quiet=False):
         try:
             if self.file_path:
-                self.logger.info("Config saved to %s", self.file_path)
+                if not quiet:
+                    self.logger.info("Config saved to %s", self.file_path)
             else:
                 self.logger.info(
                     "No config file path set; saving to Config/config.json"
