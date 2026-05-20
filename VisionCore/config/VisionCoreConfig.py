@@ -12,8 +12,8 @@ class VisionCoreConfig:
 
         self.default_config = {
             "vision_model": {
-                "file_path": "YoloModels/pytorch/_default.pt",
-                "source_pt": "YoloModels/pytorch/_default.pt",
+                "file_path": "YoloModels/pytorch/_default_pose.pt",
+                "source_pt": "YoloModels/pytorch/_default_pose.pt",
                 "input_size": [640, 640],
                 "min_conf": 0.5,
                 "margin": 10,
@@ -96,17 +96,13 @@ class VisionCoreConfig:
                 }
             },
             "plugins": {
-                "trackers": ["object_tracker", "fuel", "path_planner"],
+                "trackers": ["object_tracker", "path_planner"],
                 "utilities": ["video_recorder", "health_reporter"],
             },
         }
         self.config = json.loads(json.dumps(self.default_config))
         self.file_path = file_path
 
-        # Only auto-save defaults when `create=True` AND the file doesn't exist yet.
-        # If the file already exists we're loading it, not creating it — saving here
-        # would write defaults over the user's config AND produce a duplicate log line
-        # when the caller also calls .save() explicitly (e.g. boot.py).
         if create and file_path is not None and not Path(file_path).exists():
             self.save()
 

@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -314,11 +315,57 @@ def _inspect_tflite(model_path: str, task: str) -> dict:
 
 
 def _inspect_ultralytics(model_path: str, task: str) -> dict:
-    return {
+    try:
+        from ultralytics import YOLO
+
+        model = YOLO(model_path, task=task, verbose=False)
+        model_task = getattr(model, "task", task) or task
+        try:
+            num_classes = int(model.model.model[-1].nc)
+        except Exception:
+            num_classes = 1
+
+        if model_task == "pose":
+            try:
+                kpt_shape = model.model.model[-1].kpt_shape
+                num_keypoints = int(kpt_shape[0])
+                keypoint_dims = int(kpt_shape[1])
+            except Exception:
+                num_keypoints, keypoint_dims = 17, 3
+        else:
+            num_keypoints, keypoint_dims = None, None
+
+        input_size = [640, 640]
+        try:
+            if hasattr(model, "model") and hasattr(model.model, "args"):
+                imgsz = model.model.args.get("imgsz", 640)
+                input_size = [imgsz, imgsz] if isinstance(imgsz, int) else list(imgsz[:2])
+        except Exception:
+            pass
+
+    except Exception:
+        model_task = task
+        num_classes = 1
+        num_keypoints, keypoint_dims = None, None
+        input_size = [640, 640]
+
+    detected = [
+        "task",
+        "input.layout",
+        "input.dtype",
+        "input.normalize",
+        "output.quantization",
+        "output.layout",
+        "output.format",
+        "output.box_format",
+        "output.score_mode",
+    ]
+
+    base = {
         "file_path": model_path,
-        "task": task,
-        "num_classes": 1,
-        "input_size": [640, 640],
+        "task": model_task,
+        "num_classes": num_classes,
+        "input_size": input_size,
         "min_conf": 0.5,
         "output": {
             "format": "hardware_nms",
@@ -337,16 +384,21 @@ def _inspect_ultralytics(model_path: str, task: str) -> dict:
             "pad_value": 114,
             "normalize": False,
         },
-        "_detected_fields": [],
-        "_manual_fields": [
-            "num_classes          (Ultralytics reads from model, but set for documentation)",
-            "input_size           (verify matches your training config)",
-        ],
-        "_warnings": [
-            ".pt / OpenVINO / CoreML models are handled by Ultralytics directly - "
-            "input/output config fields are informational only and not used at runtime."
-        ],
     }
+
+    if model_task == "pose":
+        base["output"]["num_keypoints"] = num_keypoints
+        base["output"]["keypoint_dims"] = keypoint_dims
+        base["output"]["keypoint_scores_are_logits"] = False
+        detected += ["num_keypoints", "keypoint_dims"]
+
+    base["_detected_fields"] = detected
+    base["_manual_fields"] = []
+    base["_warnings"] = [
+        ".pt / OpenVINO / CoreML models are handled by Ultralytics directly - "
+        "input/output config fields are informational only and not used at runtime."
+    ]
+    return base
 
 
 def _parse_input_shape(shape) -> tuple[str, int, int, int]:
@@ -485,11 +537,12 @@ def fill_missing_config(model_config: dict) -> dict:
             "ModelInspector corrected %d config field(s) that did not match the model:",
             len(corrections),
         )
-        for field_path, user_val, detected_val in corrections:
-            logger.warning(
-                "  %-38s  config=%r  ->  model says %r",
-                field_path, user_val, detected_val,
-            )
+        # for field_path, user_val, detected_val in corrections:
+        #     msg = "  %-38s  config=%r  ->  model says %r" % (
+        #         field_path, user_val, detected_val,
+        #     )
+        #     logger.warning(msg)
+        #     print(f"[ModelInspector]{msg}", file=sys.stderr)
 
     return merged
 

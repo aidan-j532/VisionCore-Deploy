@@ -65,7 +65,7 @@ class VisionCore:
 
         tracker_classes = load_plugins(_PLUGIN_ROOT / "trackers", TrackerBase)
         self.trackers = {}
-        for name in config.get("trackers", []):
+        for name in config.get_nested("plugins", "trackers", default=[]):
             if name in tracker_classes:
                 self.trackers[name] = tracker_classes[name](config)
             else:
@@ -84,7 +84,7 @@ class VisionCore:
 
         utility_classes = load_plugins(_PLUGIN_ROOT / "utilities", UtilityBase)
         self.utilities = {}
-        for name in config.get("utilities", []):
+        for name in config.get_nested("plugins", "utilities", default=[]):
             if name in utility_classes:
                 try:
                     self.utilities[name] = utility_classes[name](context)
@@ -98,6 +98,8 @@ class VisionCore:
         nt = self.utilities.get("network_table")
         if health and nt:
             health.set_network_handler(nt)
+
+        logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
         if config["app_mode"]:
             threading.Thread(target=self.camera_app.run, daemon=True).start()
@@ -294,6 +296,8 @@ class VisionCore:
         }
 
     def run_solo_mode(self):
+        # Tell them where to lood for web stuff
+        self.logger.info("Check out the web interface at http://localhost:5000/")
         camera = self.cameras[0]
         try:
             self.logger.info("Solo mode - warming up...")

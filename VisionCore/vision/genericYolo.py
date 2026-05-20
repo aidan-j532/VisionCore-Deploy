@@ -138,9 +138,14 @@ class Results:
 
 
 class GenericYolo:
-    def __init__(self, model_config: dict, core_mask=None):
+    def __init__(self, model_config: dict, core_mask=None, visioncore_config=None):
         self.logger = logging.getLogger(__name__)
         model_config = fill_missing_config(model_config)
+
+        if visioncore_config is not None:
+            visioncore_config.set("vision_model", model_config)
+            visioncore_config.save(quiet=True)
+
         cfg = normalize_model_config(model_config)
 
         self.model_file = cfg["file_path"]
@@ -187,7 +192,7 @@ class GenericYolo:
             or self.model_file.endswith(".mlpackage")
         ):
             self.model_type = "yolo"
-            self.model = YOLO(self.model_file, verbose=False)
+            self.model = YOLO(self.model_file, task=self.task, verbose=False)
 
         else:
             raise ValueError(f"Unsupported model file type: {self.model_file}")
@@ -338,7 +343,7 @@ class GenericYolo:
                 results_list.append(self._run_tflite(frame, target_shape))
             else:
                 result = self.model(
-                    frame.copy(),
+                    frame,
                     verbose=False,
                     show=False,
                     imgsz=(self.input_size[1], self.input_size[0]),

@@ -69,14 +69,14 @@ class Metrics:
         health = self._fmt("health_s")
         fps_str = f"{1/fps:.1f}" if fps else "n/a"
 
-        self.logger.info(
-            f"[Metrics @{self._itr}] "
-            f"loop={loop_ms}  fps={fps_str}  "
-            f"vision={vision_ms}  "
-            f"cam_lag={cam_lag_ms}  "
-            f"flask={flask_ms}"
-            f"health={health}"
-        )
+        # self.logger.info(
+        #     f"[Metrics @{self._itr}] "
+        #     f"loop={loop_ms}  fps={fps_str}  "
+        #     f"vision={vision_ms}  "
+        #     f"cam_lag={cam_lag_ms}  "
+        #     f"flask={flask_ms}"
+        #     f"health={health}"
+        # )
 
     def destroy(self):
         self._log_final_summary()
@@ -95,10 +95,10 @@ class Metrics:
         self.logger.info(
             f"  Avg FPS          : {1/fps:.1f}" if fps else "  Avg FPS          : n/a"
         )
-        for key, (label, unit, scale) in self.SERIES.items():
-            v = self.avg(key)
-            if v is not None:
-                self.logger.info(f"  {label:<18}: {v * scale:.2f}{unit}")
+        # for key, (label, unit, scale) in self.SERIES.items():
+        #     v = self.avg(key)
+        #     if v is not None:
+        #         self.logger.info(f"  {label:<18}: {v * scale:.2f}{unit}")
 
     def _write_html(self):
         fig = go.Figure()

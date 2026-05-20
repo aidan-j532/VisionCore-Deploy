@@ -1,3 +1,4 @@
+import os
 from flask import Flask, Response, render_template_string, jsonify, request
 import cv2
 import threading
@@ -56,6 +57,11 @@ class CameraApp:
                 self.height, self.width = frame.shape[:2]
 
     def run(self, host='0.0.0.0', port=5000):
+        try:
+            import werkzeug.serving
+            werkzeug.serving.show_server_banner = lambda *a, **kw: None
+        except Exception:
+            pass
         self.app.run(host=host, port=port, threaded=True)
 
     def _index(self):

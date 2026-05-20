@@ -86,7 +86,8 @@ class ObjectDetectionCamera(Camera, VisionBase):
 
         self.model = GenericYolo(
             model_config,
-            self.core_mask
+            self.core_mask,
+            visioncore_config=config,
         )
 
         self._preproc_q: queue.Queue = queue.Queue(maxsize=1)

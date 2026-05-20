@@ -184,9 +184,9 @@ def setup_files():
     for fmt in ["pytorch", "onnx", "tflite", "rknn", "openvino", "coreml"]:
         (yolo_dir / fmt).mkdir(parents=True, exist_ok=True)
 
-    nano_pt = yolo_dir / "pytorch" / "_default.pt"
+    nano_pt = yolo_dir / "pytorch" / "_default_pose.pt"
     if not nano_pt.exists():
-        bundled = _ASSETS_DIR / "_default.pt"
+        bundled = _ASSETS_DIR / "_default_pose.pt"
         if bundled.exists():
             shutil.copy(bundled, nano_pt)
 
@@ -242,12 +242,11 @@ def on_boot(install_service: bool = False, first_boot: bool = False):
 
                 if not pt_full.exists():
                     logger.warning(
-                        "Model missing in workspace, copying bundled _default.pt"
+                        "Model missing in workspace, copying bundled _default_pose.pt"
                     )
 
-                    bundled = _ASSETS_DIR / "_default.pt"
-                    target = _PROJECT_ROOT / "YoloModels/pytorch/_default.pt"
-
+                    bundled = _ASSETS_DIR / "_default_pose.pt"
+                    target = _PROJECT_ROOT / "YoloModels/pytorch/_default_pose.pt"
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy(bundled, target)
 
